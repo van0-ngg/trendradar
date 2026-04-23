@@ -123,8 +123,7 @@ st.markdown("""
 # ══════════════════════════════════════════════════════════════════════════════
 #  YOUTUBE API HELPERS
 # ══════════════════════════════════════════════════════════════════════════════
-
-YOUTUBE_API_KEY = "AIzaSyBohvriC7ozhABwt16DicGZ8BWlVyS8cbA"
+API_KEY = "AIzaSyBohvriC7ozhABwt16DicGZ8BWlVyS8cbA"
 
 
 def get_youtube():

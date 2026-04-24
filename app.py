@@ -4,6 +4,9 @@ import plotly.express as px
 from datetime import datetime, timezone, timedelta
 import isodate
 import re
+import json
+import secrets as _secrets
+from pathlib import Path
 
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -41,6 +44,46 @@ _INDIA_HOSTILE_RE = re.compile(
     r'Ѐ-ӿԀ-ԯ'
     r'؀-ۿݐ-ݿࢠ-ࣿ]'
 )
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  CLIENT KEY DATABASE  (local JSON file)
+# ══════════════════════════════════════════════════════════════════════════════
+
+CLIENTS_FILE = Path(__file__).parent / "clients.json"
+
+def _load_clients() -> list[dict]:
+    """Return list of client records: [{key, label, created_at}]."""
+    if not CLIENTS_FILE.exists():
+        CLIENTS_FILE.write_text("[]", encoding="utf-8")
+    try:
+        return json.loads(CLIENTS_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+
+def _save_clients(clients: list[dict]) -> None:
+    CLIENTS_FILE.write_text(json.dumps(clients, indent=2, ensure_ascii=False), encoding="utf-8")
+
+def add_client_key(label: str = "") -> str:
+    """Generate a TR-XXXX-XXXX key, persist it, return the key string."""
+    part = lambda: _secrets.token_hex(2).upper()
+    new_key = f"TR-{part()}-{part()}"
+    clients = _load_clients()
+    clients.append({
+        "key": new_key,
+        "label": label or f"Client #{len(clients) + 1}",
+        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+    })
+    _save_clients(clients)
+    return new_key
+
+def revoke_client_key(key: str) -> None:
+    """Remove a key from the database."""
+    clients = [c for c in _load_clients() if c["key"] != key]
+    _save_clients(clients)
+
+def client_keys_set() -> set[str]:
+    return {c["key"] for c in _load_clients()}
+
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -124,13 +167,13 @@ st.markdown("""
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  1. AUTH GATE  — must pass before any data is shown
+#  1. AUTH GATE — role-based (admin / user)
 # ══════════════════════════════════════════════════════════════════════════════
 
-if "authenticated" not in st.session_state:
-    st.session_state["authenticated"] = False
+if "role" not in st.session_state:
+    st.session_state["role"] = None
 
-if not st.session_state["authenticated"]:
+if st.session_state["role"] is None:
     st.markdown("""
 <div class="hero">
   <h1>🔐 TrendRadar</h1>
@@ -140,21 +183,24 @@ if not st.session_state["authenticated"]:
 
     _, col, _ = st.columns([1, 2, 1])
     with col:
-        with st.container():
-            key_input = st.text_input(
-                "Access Key",
-                type="password",
-                placeholder="e.g. client_superbuy_01",
-                label_visibility="visible",
-            )
-            if st.button("🔓 Unlock Access", use_container_width=True, type="primary"):
-                valid_keys = list(st.secrets.get("VALID_KEYS", []))
-                if key_input and key_input.strip() in valid_keys:
-                    st.session_state["authenticated"] = True
-                    st.rerun()
-                else:
-                    st.error("❌ Invalid access key. Please contact support to get one.")
-            st.caption("Access keys are issued per client. Do not share yours.")
+        key_input = st.text_input(
+            "Access Key",
+            type="password",
+            placeholder="e.g. TR-A1B2-C3D4",
+            label_visibility="visible",
+        )
+        if st.button("🔓 Unlock Access", use_container_width=True, type="primary"):
+            k = key_input.strip()
+            admin_keys = list(st.secrets.get("ADMIN_KEYS", []))
+            if k and k in admin_keys:
+                st.session_state["role"] = "admin"
+                st.rerun()
+            elif k and k in client_keys_set():
+                st.session_state["role"] = "user"
+                st.rerun()
+            else:
+                st.error("❌ Invalid access key. Please contact support to get one.")
+        st.caption("Access keys are issued per client. Do not share yours.")
 
     st.stop()
 
@@ -505,6 +551,23 @@ def fetch_trending_shorts(target_count: int, region_code: str, country_name: str
 # ══════════════════════════════════════════════════════════════════════════════
 
 with st.sidebar:
+    # ── Role badge ────────────────────────────────────────────────────────────
+    role = st.session_state["role"]
+    if role == "admin":
+        st.markdown(
+            '<div style="background:#1e1e30;border:1px solid #6c63ff;border-radius:8px;'
+            'padding:6px 12px;font-size:.8rem;color:#a78bfa;margin-bottom:8px;">'
+            '🛡️ Logged in as <strong>Admin</strong></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            '<div style="background:#1e1e30;border:1px solid #2a2a3e;border-radius:8px;'
+            'padding:6px 12px;font-size:.8rem;color:#6b7280;margin-bottom:8px;">'
+            '👤 Logged in as <strong>Client</strong></div>',
+            unsafe_allow_html=True,
+        )
+
     st.markdown("## ⚙️ Filters")
     st.markdown("---")
 
@@ -523,7 +586,7 @@ with st.sidebar:
             st.rerun()
     with col_logout:
         if st.button("🚪 Logout", use_container_width=True):
-            st.session_state["authenticated"] = False
+            st.session_state["role"] = None
             st.rerun()
 
     sort_by = st.selectbox(
@@ -542,7 +605,58 @@ with st.sidebar:
 5. Post within **24h** of the trend peak
     """)
     st.markdown("---")
-    st.caption("🔄 Live data · refreshes every 15 min\nv0.5 · TrendRadar · Global")
+    st.caption("🔄 Live data · refreshes every 15 min\nv0.6 · TrendRadar · Global")
+
+    # ── Admin Dashboard ───────────────────────────────────────────────────────
+    if role == "admin":
+        st.markdown("---")
+        with st.expander("🛠️ Admin Dashboard", expanded=True):
+            # Generate new key
+            st.markdown("**Generate Client Key**")
+            new_label = st.text_input(
+                "Client label (optional)",
+                placeholder="e.g. John Smith / Agency X",
+                key="admin_label",
+            )
+            if st.button("➕ Generate New Client Key", use_container_width=True, type="primary"):
+                new_key = add_client_key(label=new_label)
+                st.session_state["last_generated_key"] = new_key
+
+            if "last_generated_key" in st.session_state:
+                st.success(f"New key generated — copy it now:")
+                st.code(st.session_state["last_generated_key"], language=None)
+
+            st.markdown("---")
+
+            # Clear cache
+            if st.button("🗑️ Clear Global Cache", use_container_width=True):
+                st.cache_data.clear()
+                st.success("Cache cleared.")
+
+            st.markdown("---")
+
+            # Active client keys
+            clients = _load_clients()
+            st.markdown(f"**Active Client Keys** ({len(clients)})")
+            if not clients:
+                st.caption("No client keys yet.")
+            else:
+                for c in clients:
+                    col_info, col_btn = st.columns([3, 1])
+                    with col_info:
+                        st.markdown(
+                            f'<div style="font-size:.8rem;color:#a78bfa;font-family:monospace;">'
+                            f'{c["key"]}</div>'
+                            f'<div style="font-size:.72rem;color:#6b7280;">'
+                            f'{c.get("label","")} · {c.get("created_at","")}</div>',
+                            unsafe_allow_html=True,
+                        )
+                    with col_btn:
+                        if st.button("✕", key=f"revoke_{c['key']}", help="Revoke access"):
+                            revoke_client_key(c["key"])
+                            if st.session_state.get("last_generated_key") == c["key"]:
+                                del st.session_state["last_generated_key"]
+                            st.rerun()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -765,6 +879,7 @@ Transition: {trend['transition']}
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div style="text-align:center;color:#374151;font-size:.8rem;margin-top:40px;padding:20px;">
-  TrendRadar v0.5 · Global · Live YouTube Data API · Built with Streamlit
+  TrendRadar v0.6 · Global · Live YouTube Data API · Built with Streamlit
 </div>
 """, unsafe_allow_html=True)
+

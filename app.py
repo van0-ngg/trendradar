@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime, timezone, timedelta
+import html
 import isodate
 import re
 import json
@@ -857,6 +858,8 @@ for trend in filtered:
             st.image(trend["thumb"], use_container_width=True)
 
     with col_main:
+        safe_title = html.escape(trend["title"])
+        safe_niche = html.escape(trend["niche"])
         suspect_html = (
             '<span class="badge" style="background:#2d1a0d;color:#fb923c;'
             'border:1px solid #9a3412;">⚠️ Suspect Engagement</span>'
@@ -867,14 +870,14 @@ for trend in filtered:
   <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">
     <div>
       <span class="badge {trend['badge']}">{trend['hot_label']}</span>
-      <span class="badge" style="background:#1e1e30;color:#a78bfa;">{trend['niche']}</span>
+      <span class="badge" style="background:#1e1e30;color:#a78bfa;">{safe_niche}</span>
       <span class="badge" style="background:#0d2d1a;color:#4ade80;border:1px solid #166534;">{trend['content_format']}</span>
       {suspect_html}
     </div>
     <div style="color:#6b7280;font-size:.82rem;">posted {age_str}</div>
   </div>
   <h3 style="color:#f0f0ff;margin:14px 0 6px;font-size:1.1rem;">
-    <a href="{trend['url']}" target="_blank">{trend['title']}</a>
+    <a href="{trend['url']}" target="_blank">{safe_title}</a>
   </h3>
   <div style="color:#9ca3af;font-size:.82rem;margin-bottom:6px;">Velocity Score</div>
   <div style="display:flex;align-items:center;gap:12px;">

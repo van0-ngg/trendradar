@@ -488,46 +488,66 @@ def fetch_trending_shorts(target_count: int, region_code: str, country_name: str
     yt = get_youtube()
     country_cfg = COUNTRIES[country_name]
 
-    # ── Step 1: collect video IDs via paginated search.list ──────────────────
-    video_ids: list[str] = []
-    page_token: str | None = None
-    max_pages = max(1, target_count // 50)          # e.g. 200 → 4 pages
+    # ── Step 1: collect video IDs ─────────────────────────────────────────────
+    # EN markets: multi-query funnel to compensate for heavy filtering.
+    # Other markets: single localized query (fewer filters, less waste).
+    RAW_CAP = 450          # hard ceiling on raw IDs before expensive batch calls
     published_after = (
         datetime.now(timezone.utc).replace(microsecond=0) - timedelta(days=3)
     ).isoformat()
 
-    for _ in range(max_pages):
-        search_kwargs: dict = dict(
-            part="snippet",
-            q=country_cfg.get("q", "#shorts"),
-            type="video",
-            videoDuration="short",
-            regionCode=region_code,
-            order="viewCount",
-            maxResults=50,
-            publishedAfter=published_after,
-        )
-        if country_cfg["rl"]:
-            search_kwargs["relevanceLanguage"] = country_cfg["rl"]
-        if page_token:
-            search_kwargs["pageToken"] = page_token
+    if country_cfg["code"] in EN_MARKET_CODES:
+        queries = [
+            country_cfg.get("q", "#shorts trending viral"),
+            "#shorts viral",
+            "#shorts challenge",
+            "#shorts trend",
+        ]
+        pages_per_query = 3    # 3 × 50 = up to 150 raw IDs per query → ~600 before cap
+    else:
+        queries = [country_cfg.get("q", "#shorts")]
+        pages_per_query = max(1, target_count // 50)
 
-        search_resp = yt.search().list(**search_kwargs).execute()
+    seen_raw: set[str] = set()
+    unique_ids: list[str] = []
 
-        for item in search_resp.get("items", []):
-            if item["id"].get("kind") == "youtube#video":
-                video_ids.append(item["id"]["videoId"])
-
-        page_token = search_resp.get("nextPageToken")
-        if not page_token:
+    for query in queries:
+        if len(unique_ids) >= RAW_CAP:
             break
+        page_token: str | None = None
+        for _ in range(pages_per_query):
+            if len(unique_ids) >= RAW_CAP:
+                break
+            search_kwargs: dict = dict(
+                part="snippet",
+                q=query,
+                type="video",
+                videoDuration="short",
+                regionCode=region_code,
+                order="viewCount",
+                maxResults=50,
+                publishedAfter=published_after,
+            )
+            if country_cfg["rl"]:
+                search_kwargs["relevanceLanguage"] = country_cfg["rl"]
+            if page_token:
+                search_kwargs["pageToken"] = page_token
 
-    if not video_ids:
+            search_resp = yt.search().list(**search_kwargs).execute()
+
+            for item in search_resp.get("items", []):
+                if item["id"].get("kind") == "youtube#video":
+                    vid = item["id"]["videoId"]
+                    if vid not in seen_raw:
+                        seen_raw.add(vid)
+                        unique_ids.append(vid)
+
+            page_token = search_resp.get("nextPageToken")
+            if not page_token:
+                break
+
+    if not unique_ids:
         return []
-
-    # Deduplicate while preserving order
-    seen: set[str] = set()
-    unique_ids = [vid for vid in video_ids if not (vid in seen or seen.add(vid))]
 
     # ── Step 2: fetch full details in batches of 50 ───────────────────────────
     all_items: list[dict] = []

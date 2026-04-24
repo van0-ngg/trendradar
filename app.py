@@ -9,9 +9,6 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 # ── Country / Region config ───────────────────────────────────────────────────
-# langs      : frozenset of accepted BCP-47 language base codes
-# rl         : relevanceLanguage passed to search.list (None = omit)
-# script     : which Layer-2 check to apply (see is_target_language)
 COUNTRIES: dict[str, dict] = {
     "🇺🇸 United States":  {"code": "US", "langs": frozenset(["en"]),                              "rl": "en",  "script": "latin"},
     "🇬🇧 United Kingdom": {"code": "GB", "langs": frozenset(["en"]),                              "rl": "en",  "script": "latin"},
@@ -23,28 +20,26 @@ COUNTRIES: dict[str, dict] = {
     "🇯🇵 Japan":          {"code": "JP", "langs": frozenset(["ja"]),                              "rl": "ja",  "script": "cjk"},
 }
 
-# Small reusable patterns compiled once
-_LATIN_WORD_RE  = re.compile(r'[a-zA-Z]{3,}')   # ≥3 consecutive Latin letters
-_HAS_LATIN_RE   = re.compile(r'[a-zA-Z]')        # any single Latin letter
-_CLEAN_TITLE_RE = re.compile(r'[#\[\]@|]')       # chars to strip from MJ prompts
+_LATIN_WORD_RE  = re.compile(r'[a-zA-Z]{3,}')
+_HAS_LATIN_RE   = re.compile(r'[a-zA-Z]')
+_CLEAN_TITLE_RE = re.compile(r'[#\[\]@|]')
 
-# Script-presence patterns — used by is_target_language Layer 2
-_DEVANAGARI_RE = re.compile(r'[\u0900-\u097F\u0980-\u09FF\u0A80-\u0AFF\u0B80-\u0BFF\u0C00-\u0CFF\u0D00-\u0D7F]')
-_CJK_KANA_RE   = re.compile(r'[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3400-\u4DBF]')
-# Scripts that are "hostile" for Latin-target countries
-_HOSTILE_RE    = re.compile(
-    r'[\u0900-\u097F\u0980-\u09FF\u0A00-\u0AFF\u0B00-\u0BFF'   # Indic
-    r'\u0C00-\u0CFF\u0D00-\u0D7F'
-    r'\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF'    # Arabic
-    r'\u0400-\u04FF\u0500-\u052F'                               # Cyrillic
-    r'\u4E00-\u9FFF\u3400-\u4DBF\u3040-\u309F\u30A0-\u30FF'    # CJK / Kana
-    r'\uAC00-\uD7AF\u0E00-\u0E7F\u05D0-\u05EA]'                # Hangul/Thai/Hebrew
+_DEVANAGARI_RE    = re.compile(r'[ऀ-ॿঀ-৿઀-૿஀-௿ఀ-೿ഀ-ൿ]')
+_CJK_KANA_RE      = re.compile(r'[぀-ゟ゠-ヿ一-鿿㐀-䶿]')
+_CYRILLIC_RE      = re.compile(r'[Ѐ-ӿԀ-ԯ]')  # explicit Cyrillic geo-filter
+
+_HOSTILE_RE = re.compile(
+    r'[ऀ-ॿঀ-৿਀-૿଀-௿'
+    r'ఀ-೿ഀ-ൿ'
+    r'؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿'
+    r'Ѐ-ӿԀ-ԯ'
+    r'一-鿿㐀-䶿぀-ゟ゠-ヿ'
+    r'가-힯฀-๿א-ת]'
 )
-# For India: CJK, Cyrillic, Arabic are hostile; Indic + Latin are both fine
 _INDIA_HOSTILE_RE = re.compile(
-    r'[\u4E00-\u9FFF\u3040-\u30FF\uAC00-\uD7AF'    # CJK / Kana / Hangul
-    r'\u0400-\u04FF\u0500-\u052F'                  # Cyrillic
-    r'\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]'    # Arabic
+    r'[一-鿿぀-ヿ가-힯'
+    r'Ѐ-ӿԀ-ԯ'
+    r'؀-ۿݐ-ݿࢠ-ࣿ]'
 )
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -68,6 +63,14 @@ st.markdown("""
   }
   .hero h1 { color:#fff; font-size:2.4rem; font-weight:800; margin:0; }
   .hero p  { color:rgba(255,255,255,.85); font-size:1.05rem; margin:8px 0 0; }
+
+  .auth-container {
+    max-width: 440px; margin: 60px auto; padding: 40px;
+    background:#13131f; border:1px solid #2a2a3e; border-radius:20px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.5);
+  }
+  .auth-container h2 { color:#f0f0ff; font-size:1.5rem; margin:0 0 8px; }
+  .auth-container p  { color:#9ca3af; font-size:.9rem; margin:0 0 24px; }
 
   .trend-card {
     background:#13131f; border:1px solid #2a2a3e; border-radius:20px;
@@ -121,50 +124,87 @@ st.markdown("""
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+#  1. AUTH GATE  — must pass before any data is shown
+# ══════════════════════════════════════════════════════════════════════════════
+
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+if not st.session_state["authenticated"]:
+    st.markdown("""
+<div class="hero">
+  <h1>🔐 TrendRadar</h1>
+  <p>Enter your access key to unlock the trend intelligence platform.</p>
+</div>
+""", unsafe_allow_html=True)
+
+    _, col, _ = st.columns([1, 2, 1])
+    with col:
+        with st.container():
+            key_input = st.text_input(
+                "Access Key",
+                type="password",
+                placeholder="e.g. client_superbuy_01",
+                label_visibility="visible",
+            )
+            if st.button("🔓 Unlock Access", use_container_width=True, type="primary"):
+                valid_keys = list(st.secrets.get("VALID_KEYS", []))
+                if key_input and key_input.strip() in valid_keys:
+                    st.session_state["authenticated"] = True
+                    st.rerun()
+                else:
+                    st.error("❌ Invalid access key. Please contact support to get one.")
+            st.caption("Access keys are issued per client. Do not share yours.")
+
+    st.stop()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  YOUTUBE API HELPERS
 # ══════════════════════════════════════════════════════════════════════════════
-API_KEY = "AIzaSyBohvriC7ozhABwt16DicGZ8BWlVyS8cbA"
-
 
 def get_youtube():
-    return build("youtube", "v3", developerKey=API_KEY, cache_discovery=False)
+    api_key = st.secrets.get("YOUTUBE_API_KEY", "")
+    return build("youtube", "v3", developerKey=api_key, cache_discovery=False)
 
 def is_short(item):
-    """A video is a Short if duration ≤ 60 s OR title/tags contain #shorts."""
     duration_sec = 0
     raw = item["contentDetails"].get("duration", "PT0S")
     try:
         duration_sec = int(isodate.parse_duration(raw).total_seconds())
     except Exception:
         pass
-
     title = item["snippet"].get("title", "").lower()
     tags  = " ".join(item["snippet"].get("tags", [])).lower()
     has_tag = "#shorts" in title or "#shorts" in tags or "#short" in title
-
     return duration_sec <= 60 or has_tag
 
 def is_target_language(title: str, desc: str, snippet: dict, country_cfg: dict) -> bool:
     """
-    Three-layer language filter, adapts to any selected country.
+    Three-layer language filter + hard geo-filter for latin-script countries.
 
-    Layer 1 — YouTube metadata  : fastest, most authoritative
-    Layer 2 — Script detection  : Unicode range regex, zero false-negatives
-    Layer 3 — Minimum content   : at least one real word in the expected script
+    Layer 0 — Hard geo-filter : reject Cyrillic/Devanagari in title for EN/ES/PT/DE/FR markets
+    Layer 1 — YouTube metadata : fastest, most authoritative
+    Layer 2 — Script detection : Unicode range regex
+    Layer 3 — Minimum content : at least one real word in expected script
     """
     target_langs = country_cfg["langs"]
-    script_mode  = country_cfg["script"]   # "latin" | "india" | "cjk"
+    script_mode  = country_cfg["script"]
     text = title + " " + desc[:100]
 
-    # ── Layer 1: YouTube metadata ────────────────────────────────────────────
+    # ── Layer 0: Hard geo-filter (Cyrillic + Devanagari) for latin markets ───
+    if script_mode == "latin":
+        if _CYRILLIC_RE.search(title) or _DEVANAGARI_RE.search(title):
+            return False
+
+    # ── Layer 1: YouTube metadata ─────────────────────────────────────────────
     for field in ("defaultLanguage", "defaultAudioLanguage"):
         lang = (snippet.get(field) or "").split("-")[0].lower()
         if lang:
             return lang in target_langs
 
-    # ── Layer 2: Script presence / absence ──────────────────────────────────
+    # ── Layer 2: Script presence / absence ───────────────────────────────────
     if script_mode == "cjk":
-        # Japanese: must have kana or kanji in the title
         return bool(_CJK_KANA_RE.search(title))
 
     if script_mode == "india":
@@ -172,7 +212,7 @@ def is_target_language(title: str, desc: str, snippet: dict, country_cfg: dict) 
             return False
         return bool(_DEVANAGARI_RE.search(title)) or bool(_LATIN_WORD_RE.search(title))
 
-    # script_mode == "latin"  (en, es, pt, de, fr, …)
+    # script_mode == "latin"
     if _HOSTILE_RE.search(text):
         return False
     return bool(_LATIN_WORD_RE.search(title))
@@ -183,7 +223,6 @@ def hours_since(published_at: str) -> float:
     return max((now - pub).total_seconds() / 3600, 0.1)
 
 def velocity_score(views: int, age_hours: float) -> float:
-    """Average views/hour — higher = faster growing."""
     return round(views / age_hours, 0)
 
 def categorise(title: str, description: str) -> str:
@@ -214,7 +253,6 @@ def bpm_for_niche(niche: str) -> int:
     }.get(niche, 120)
 
 def pace_for_niche(niche: str) -> tuple[str, int, str]:
-    """Returns (pace_label, cuts_per_min, transition)."""
     fast  = ("Very fast cuts", 28, "Hard cut + beat sync")
     med   = ("Medium cuts",    14, "Smooth fade")
     slow  = ("Slow & cinematic", 7, "Cross-dissolve")
@@ -248,14 +286,12 @@ def sound_for_niche(niche: str) -> dict:
     return s
 
 def generate_hooks(title: str, niche: str) -> list[str]:
-    """Generate 3 hook variants based on real video title."""
     short_title = title[:50]
-    hooks = [
+    return [
         f'"{short_title}" — you need to see this 👀',
         f"Nobody talks about this ({niche.split('/')[0].strip()} secret 🤫)",
         f"I tried this for 7 days… here's what happened 🤯",
     ]
-    return hooks
 
 def generate_capcut_steps(niche: str, title: str) -> list[tuple[str, str]]:
     templates = {
@@ -346,50 +382,68 @@ def badge_for_velocity(vel: float, max_vel: float) -> tuple[str, str]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  FETCH DATA (cached 15 min)
+#  2. FETCH DATA — pagination up to 200 videos (4 × 50)
 # ══════════════════════════════════════════════════════════════════════════════
 
 @st.cache_data(ttl=900, show_spinner=False)
-def fetch_trending_shorts(max_results: int, region_code: str, country_name: str) -> list[dict]:
+def fetch_trending_shorts(target_count: int, region_code: str, country_name: str) -> list[dict]:
     yt = get_youtube()
     country_cfg = COUNTRIES[country_name]
 
-    # Step 1 — search.list with dynamic region + relevanceLanguage
-    search_kwargs = dict(
-        part="snippet",
-        q="#shorts",
-        type="video",
-        videoDuration="short",
-        regionCode=region_code,
-        order="viewCount",
-        maxResults=max_results,
-        publishedAfter=(
-            datetime.now(timezone.utc).replace(microsecond=0)
-            - timedelta(days=3)
-        ).isoformat(),
-    )
-    if country_cfg["rl"]:
-        search_kwargs["relevanceLanguage"] = country_cfg["rl"]
+    # ── Step 1: collect video IDs via paginated search.list ──────────────────
+    video_ids: list[str] = []
+    page_token: str | None = None
+    max_pages = max(1, target_count // 50)          # e.g. 200 → 4 pages
+    published_after = (
+        datetime.now(timezone.utc).replace(microsecond=0) - timedelta(days=3)
+    ).isoformat()
 
-    search_resp = yt.search().list(**search_kwargs).execute()
+    for _ in range(max_pages):
+        search_kwargs: dict = dict(
+            part="snippet",
+            q="#shorts",
+            type="video",
+            videoDuration="short",
+            regionCode=region_code,
+            order="viewCount",
+            maxResults=50,
+            publishedAfter=published_after,
+        )
+        if country_cfg["rl"]:
+            search_kwargs["relevanceLanguage"] = country_cfg["rl"]
+        if page_token:
+            search_kwargs["pageToken"] = page_token
 
-    video_ids = [
-        item["id"]["videoId"]
-        for item in search_resp.get("items", [])
-        if item["id"].get("kind") == "youtube#video"
-    ]
+        search_resp = yt.search().list(**search_kwargs).execute()
+
+        for item in search_resp.get("items", []):
+            if item["id"].get("kind") == "youtube#video":
+                video_ids.append(item["id"]["videoId"])
+
+        page_token = search_resp.get("nextPageToken")
+        if not page_token:
+            break
 
     if not video_ids:
         return []
 
-    # Step 2 — videos.list: fetch full statistics + content details in one batch call
-    stats_resp = yt.videos().list(
-        part="snippet,statistics,contentDetails",
-        id=",".join(video_ids),
-    ).execute()
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique_ids = [vid for vid in video_ids if not (vid in seen or seen.add(vid))]
 
-    results = []
-    for item in stats_resp.get("items", []):
+    # ── Step 2: fetch full details in batches of 50 ───────────────────────────
+    all_items: list[dict] = []
+    for i in range(0, len(unique_ids), 50):
+        batch = unique_ids[i : i + 50]
+        stats_resp = yt.videos().list(
+            part="snippet,statistics,contentDetails",
+            id=",".join(batch),
+        ).execute()
+        all_items.extend(stats_resp.get("items", []))
+
+    # ── Step 3: filter, score, build result list ──────────────────────────────
+    results: list[dict] = []
+    for item in all_items:
         if not is_short(item):
             continue
 
@@ -397,13 +451,12 @@ def fetch_trending_shorts(max_results: int, region_code: str, country_name: str)
         title   = snippet.get("title", "Untitled")
         desc    = snippet.get("description", "")
 
-        # Hard filter — runs before ANY further processing or allocation
         if not is_target_language(title, desc, snippet, country_cfg):
             continue
 
-        stats   = item.get("statistics", {})
-        pub_at  = snippet.get("publishedAt", "")
-        vid_id  = item["id"]
+        stats    = item.get("statistics", {})
+        pub_at   = snippet.get("publishedAt", "")
+        vid_id   = item["id"]
 
         views    = int(stats.get("viewCount", 0))
         likes    = int(stats.get("likeCount", 0))
@@ -438,7 +491,6 @@ def fetch_trending_shorts(max_results: int, region_code: str, country_name: str)
             "url":            f"https://youtube.com/shorts/{vid_id}",
         })
 
-    # Normalize velocity 0–100
     if results:
         max_vel = max(r["velocity"] for r in results)
         for r in results:
@@ -464,9 +516,15 @@ with st.sidebar:
     )
     selected_country = COUNTRIES[country_name]
 
-    if st.button("🔄 Refresh data", use_container_width=True):
-        st.cache_data.clear()
-        st.rerun()
+    col_refresh, col_logout = st.columns([3, 2])
+    with col_refresh:
+        if st.button("🔄 Refresh data", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+    with col_logout:
+        if st.button("🚪 Logout", use_container_width=True):
+            st.session_state["authenticated"] = False
+            st.rerun()
 
     sort_by = st.selectbox(
         "Sort by",
@@ -484,7 +542,7 @@ with st.sidebar:
 5. Post within **24h** of the trend peak
     """)
     st.markdown("---")
-    st.caption("🔄 Live data · refreshes every 15 min\nv0.4 · TrendRadar · Global")
+    st.caption("🔄 Live data · refreshes every 15 min\nv0.5 · TrendRadar · Global")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -500,12 +558,12 @@ st.markdown(f"""
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  LOAD DATA
+#  LOAD DATA  (200 videos = 4 pages × 50)
 # ══════════════════════════════════════════════════════════════════════════════
 
-with st.spinner(f"Fetching live Shorts for {country_name}…"):
+with st.spinner(f"Fetching up to 200 live Shorts for {country_name}…"):
     try:
-        all_trends = fetch_trending_shorts(50, selected_country["code"], country_name)
+        all_trends = fetch_trending_shorts(200, selected_country["code"], country_name)
     except HttpError as e:
         st.error(f"YouTube API error: {e}")
         st.stop()
@@ -525,8 +583,8 @@ filtered = [
 ]
 
 sort_map = {
-    "🚀 Velocity Score": lambda t: t["velocity_score"],
-    "👁️ Total Views":    lambda t: t["views"],
+    "🚀 Velocity Score":  lambda t: t["velocity_score"],
+    "👁️ Total Views":     lambda t: t["views"],
     "❤️ Engagement Rate": lambda t: t["engagement"],
 }
 filtered.sort(key=sort_map[sort_by], reverse=True)
@@ -542,10 +600,10 @@ fire_count  = sum(1 for t in filtered if t["badge"] == "badge-fire")
 top_niche   = max(filtered, key=lambda t: t["velocity_score"])["niche"].split("/")[0].strip() if filtered else "—"
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("🔥 Viral Now",      fire_count)
-c2.metric("📊 Avg Velocity",   f"{avg_vel}/100")
-c3.metric("👁️ Total Views",    format_count(total_views))
-c4.metric("🏆 Top Niche",      top_niche)
+c1.metric("🔥 Viral Now",    fire_count)
+c2.metric("📊 Avg Velocity", f"{avg_vel}/100")
+c3.metric("👁️ Total Views",  format_count(total_views))
+c4.metric("🏆 Top Niche",    top_niche)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -565,7 +623,7 @@ with st.expander("📈 Velocity Chart — compare all trends", expanded=False):
     fig.update_layout(
         paper_bgcolor="#0a0a0f", plot_bgcolor="#13131f",
         font_color="#d1d5db", height=420,
-        margin=dict(l=0,r=20,t=10,b=10),
+        margin=dict(l=0, r=20, t=10, b=10),
         yaxis=dict(tickfont=dict(size=10)),
         legend=dict(bgcolor="#0a0a0f", bordercolor="#2a2a3e"),
     )
@@ -618,14 +676,12 @@ for trend in filtered:
 </div>
 """, unsafe_allow_html=True)
 
-    # Stats
     s1, s2, s3, s4 = st.columns(4)
     s1.metric("👁️ Views",      format_count(trend["views"]))
     s2.metric("❤️ Likes",      format_count(trend["likes"]))
     s3.metric("💬 Comments",   format_count(trend["comments"]))
     s4.metric("❤️ Engagement", f"{trend['engagement']}%")
 
-    # CapCut Recipe
     with st.expander(f"🎬 CapCut Recipe — {trend['title'][:40]}…"):
         s = trend["sound"]
         tab1, tab2, tab3, tab4 = st.tabs(["🎵 Sound & Pace", "📝 Hook Texts", "🎬 CapCut Steps", "🎨 Midjourney"])
@@ -676,7 +732,6 @@ for trend in filtered:
             st.code(trend["mj_prompt"], language=None)
             st.caption("Click the copy icon (top-right of the box above) → paste into Midjourney Discord")
 
-        # ── Copy Full Recipe (st.code = built-in copy button) ─────────────────
         st.markdown("---")
         st.markdown("##### 📋 Full Recipe — copy everything at once")
 
@@ -710,6 +765,6 @@ Transition: {trend['transition']}
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div style="text-align:center;color:#374151;font-size:.8rem;margin-top:40px;padding:20px;">
-  TrendRadar v0.4 · Global · Live YouTube Data API · Built with Streamlit
+  TrendRadar v0.5 · Global · Live YouTube Data API · Built with Streamlit
 </div>
 """, unsafe_allow_html=True)

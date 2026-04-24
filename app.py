@@ -295,13 +295,20 @@ def velocity_score(views: int, age_hours: float) -> float:
     return round(views / age_hours, 0)
 
 def categorise(title: str, description: str) -> str:
+    text = (title + " " + description).lower()
+    # AI & Tech is highest priority — checked before any script guard
+    _AI_KEYWORDS = [
+        "ai ", "chatgpt", "midjourney", "elevenlabs", "gpt", "нейросеть",
+        "ии ", "heygen", "artificial intelligence", "openai",
+    ]
+    if any(k in text for k in _AI_KEYWORDS):
+        return "🤖 AI & Tech"
     if not _HAS_LATIN_RE.search(title):
         return "General"
-    text = (title + " " + description).lower()
     rules = {
         "Finance / Money":    ["money","income","salary","invest","crypto","earn","revenue","profit","rich","wealth"],
         "Fitness / Health":   ["gym","workout","fitness","diet","calories","muscle","weight","run","exercise","sleep"],
-        "Productivity / AI":  ["chatgpt","ai","productivity","notion","hack","workflow","automation","gpt","claude","tool"],
+        "Productivity / AI":  ["productivity","notion","hack","workflow","automation","claude","tool"],
         "Tech / Gadgets":     ["iphone","android","gadget","amazon","tech","review","unboxing","laptop","phone","device"],
         "Creator Tools":      ["capcut","premiere","edit","youtube","tiktok","instagram","content","creator","viral","views"],
         "Food / Recipe":      ["recipe","food","cook","meal","eat","drink","kitchen","chef","taste","bake"],
@@ -315,10 +322,11 @@ def categorise(title: str, description: str) -> str:
 
 def bpm_for_niche(niche: str) -> int:
     return {
-        "Finance / Money": 130, "Fitness / Health": 145,
-        "Productivity / AI": 128, "Tech / Gadgets": 115,
-        "Creator Tools": 155, "Food / Recipe": 100,
-        "Fashion / Beauty": 120, "Motivation": 140,
+        "🤖 AI & Tech":     135,
+        "Finance / Money":  130, "Fitness / Health":   145,
+        "Productivity / AI":128, "Tech / Gadgets":     115,
+        "Creator Tools":    155, "Food / Recipe":      100,
+        "Fashion / Beauty": 120, "Motivation":         140,
     }.get(niche, 120)
 
 def pace_for_niche(niche: str) -> tuple[str, int, str]:
@@ -327,6 +335,7 @@ def pace_for_niche(niche: str) -> tuple[str, int, str]:
     slow  = ("Slow & cinematic", 7, "Cross-dissolve")
     nfast = ("Fast cuts",      22, "Zoom + glitch")
     return {
+        "🤖 AI & Tech":      nfast,
         "Finance / Money":   nfast,
         "Fitness / Health":  fast,
         "Productivity / AI": nfast,
@@ -339,6 +348,7 @@ def pace_for_niche(niche: str) -> tuple[str, int, str]:
 
 def sound_for_niche(niche: str) -> dict:
     library = {
+        "🤖 AI & Tech":      {"name":"GODS","artist":"NewJeans","vibe":"Cinematic / Futuristic","search":"NewJeans GODS AI tech shorts trending"},
         "Finance / Money":   {"name":"Metamorphosis","artist":"Interworld","vibe":"Epic / Cinematic","search":"Interworld Metamorphosis"},
         "Fitness / Health":  {"name":"Power","artist":"Kanye West (sped up)","vibe":"Hype / Energetic","search":"Power Kanye sped up shorts"},
         "Productivity / AI": {"name":"Gimme More","artist":"Britney Spears (sped up)","vibe":"Trending TikTok","search":"Gimme More sped up trending"},
@@ -364,6 +374,14 @@ def generate_hooks(title: str, niche: str) -> list[str]:
 
 def generate_capcut_steps(niche: str, title: str) -> list[tuple[str, str]]:
     templates = {
+        "🤖 AI & Tech": [
+            ("0:00–0:02", "Hook text on black: 'This AI can…' — glitch/digital reveal effect"),
+            ("0:02–0:06", "Screen-record of AI tool output — zoom + highlight the result"),
+            ("0:06–0:14", "Fast demo: before (manual) → after (AI) — hard cut on beat"),
+            ("0:14–0:22", "Key capability shown with text callouts + zoomed UI"),
+            ("0:22–0:27", "Real-world use case or output montage — 3 rapid cuts"),
+            ("0:27–0:30", "CTA: 'Free link in bio 🔗 + follow for more AI tools'"),
+        ],
         "Finance / Money": [
             ("0:00–0:02", "Income/result screenshot — blur the number slightly for curiosity"),
             ("0:02–0:06", "Reveal the number with zoom-in + sound effect"),
@@ -418,6 +436,7 @@ def generate_capcut_steps(niche: str, title: str) -> list[tuple[str, str]]:
 def generate_mj_prompt(title: str, niche: str) -> str:
     topic = _CLEAN_TITLE_RE.sub('', title).strip()[:60]
     style_map = {
+        "🤖 AI & Tech":      "neural network visualization, deep blue and electric purple data streams, futuristic AI interface, cyberpunk neon glow, 9:16 vertical",
         "Finance / Money":   "dark luxury penthouse office, gold and black color palette, dramatic rim lighting, cinematic depth of field",
         "Fitness / Health":  "high-end gym interior, neon accent lighting, motivational atmosphere, mist and blue tones",
         "Productivity / AI": "futuristic holographic interface, dark tech room, glowing blue code, cyberpunk aesthetic",
@@ -560,6 +579,14 @@ def fetch_trending_shorts(target_count: int, region_code: str, country_name: str
         views    = int(stats.get("viewCount", 0))
         likes    = int(stats.get("likeCount", 0))
         comments = int(stats.get("commentCount", 0))
+        eng_rate = round((likes + comments) / max(views, 1) * 100, 2)
+
+        # Anti-bot: drop inflated-view videos with near-zero organic engagement
+        if views > 10_000 and eng_rate < 2.0:
+            continue
+
+        suspect_engagement = views > 1_000 and eng_rate < 3.5
+
         age_h    = hours_since(pub_at)
         vel      = velocity_score(views, age_h)
         niche          = categorise(title, desc)
@@ -579,8 +606,9 @@ def fetch_trending_shorts(target_count: int, region_code: str, country_name: str
             "age_hours":      round(age_h, 1),
             "age_str":        age_str,
             "velocity":       vel,
-            "velocity_score": 0.0,
-            "engagement":     round((likes + comments) / max(views, 1) * 100, 2),
+            "velocity_score":      0.0,
+            "engagement":          eng_rate,
+            "suspect_engagement":  suspect_engagement,
             "sound":          sound_for_niche(niche),
             "pace_label":     pace_lbl,
             "cuts_per_min":   cpm,
@@ -829,6 +857,11 @@ for trend in filtered:
             st.image(trend["thumb"], use_container_width=True)
 
     with col_main:
+        suspect_html = (
+            '<span class="badge" style="background:#2d1a0d;color:#fb923c;'
+            'border:1px solid #9a3412;">⚠️ Suspect Engagement</span>'
+            if trend.get("suspect_engagement") else ""
+        )
         st.markdown(f"""
 <div class="trend-card">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">
@@ -836,6 +869,7 @@ for trend in filtered:
       <span class="badge {trend['badge']}">{trend['hot_label']}</span>
       <span class="badge" style="background:#1e1e30;color:#a78bfa;">{trend['niche']}</span>
       <span class="badge" style="background:#0d2d1a;color:#4ade80;border:1px solid #166534;">{trend['content_format']}</span>
+      {suspect_html}
     </div>
     <div style="color:#6b7280;font-size:.82rem;">posted {age_str}</div>
   </div>

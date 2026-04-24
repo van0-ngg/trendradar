@@ -12,15 +12,16 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 # ── Country / Region config ───────────────────────────────────────────────────
+# q: localized search query sent to YouTube — boosts regional relevance
 COUNTRIES: dict[str, dict] = {
-    "🇺🇸 United States":  {"code": "US", "langs": frozenset(["en"]),                              "rl": "en",  "script": "latin"},
-    "🇬🇧 United Kingdom": {"code": "GB", "langs": frozenset(["en"]),                              "rl": "en",  "script": "latin"},
-    "🇪🇸 Spain":          {"code": "ES", "langs": frozenset(["es"]),                              "rl": "es",  "script": "latin"},
-    "🇧🇷 Brazil":         {"code": "BR", "langs": frozenset(["pt"]),                              "rl": "pt",  "script": "latin"},
-    "🇩🇪 Germany":        {"code": "DE", "langs": frozenset(["de"]),                              "rl": "de",  "script": "latin"},
-    "🇫🇷 France":         {"code": "FR", "langs": frozenset(["fr"]),                              "rl": "fr",  "script": "latin"},
-    "🇮🇳 India":          {"code": "IN", "langs": frozenset(["hi","en","ta","te","mr","bn","gu"]), "rl": "hi",  "script": "india"},
-    "🇯🇵 Japan":          {"code": "JP", "langs": frozenset(["ja"]),                              "rl": "ja",  "script": "cjk"},
+    "🇺🇸 United States":  {"code": "US", "langs": frozenset(["en"]),                              "rl": "en",  "script": "latin",  "q": "#shorts trending viral"},
+    "🇬🇧 United Kingdom": {"code": "GB", "langs": frozenset(["en"]),                              "rl": "en",  "script": "latin",  "q": "#shorts trending viral"},
+    "🇪🇸 Spain":          {"code": "ES", "langs": frozenset(["es"]),                              "rl": "es",  "script": "latin",  "q": "#shorts tendencias viral"},
+    "🇧🇷 Brazil":         {"code": "BR", "langs": frozenset(["pt"]),                              "rl": "pt",  "script": "latin",  "q": "#shorts tendência viral"},
+    "🇩🇪 Germany":        {"code": "DE", "langs": frozenset(["de"]),                              "rl": "de",  "script": "latin",  "q": "#shorts trend viral"},
+    "🇫🇷 France":         {"code": "FR", "langs": frozenset(["fr"]),                              "rl": "fr",  "script": "latin",  "q": "#shorts tendance viral"},
+    "🇮🇳 India":          {"code": "IN", "langs": frozenset(["hi","en","ta","te","mr","bn","gu"]), "rl": "hi",  "script": "india",  "q": "#shorts trending viral"},
+    "🇯🇵 Japan":          {"code": "JP", "langs": frozenset(["ja"]),                              "rl": "ja",  "script": "cjk",    "q": "#shorts おすすめ トレンド"},
 }
 
 _LATIN_WORD_RE  = re.compile(r'[a-zA-Z]{3,}')
@@ -32,6 +33,18 @@ _CJK_KANA_RE      = re.compile(r'[぀-ゟ゠-ヿ一-鿿㐀-䶿]')
 _CYRILLIC_RE      = re.compile(r'[Ѐ-ӿԀ-ԯ]')  # explicit Cyrillic geo-filter
 _HINGLISH_RE      = re.compile(
     r'\b(?:ke|ko|ki|hai|mein|ne|aur|yeh|woh|bhai|desi|kya|hua|banayi)\b',
+    re.IGNORECASE,
+)
+
+# Content-format detection
+_STREAM_RE  = re.compile(
+    r'\b(?:twitch|kick|stream(?:er|ing)?|gameplay|gaming|gta|minecraft|fortnite|'
+    r'стрим|нарезка|live\s+stream|vod|esport)\b',
+    re.IGNORECASE,
+)
+_PODCAST_RE = re.compile(
+    r'\b(?:podcast|interview|ep\.?\s*\d+|episode|hosted\s+by|подкаст|интервью|'
+    r'talk\s+show|mic\s+check|sit\s*down\s*with)\b',
     re.IGNORECASE,
 )
 
@@ -432,6 +445,15 @@ def badge_for_velocity(vel: float, max_vel: float) -> tuple[str, str]:
         return "📈 RISING", "badge-rising"
     return "🆕 NEW", "badge-new"
 
+def tag_content_format(title: str, desc: str) -> str:
+    """Classify video into a broad creator-format bucket."""
+    text = title + " " + desc[:300]
+    if _STREAM_RE.search(text):
+        return "🎮 Stream / Gaming"
+    if _PODCAST_RE.search(text):
+        return "🎙️ Podcast / Interview"
+    return "🎬 Original / Creator"
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  2. FETCH DATA — pagination up to 200 videos (4 × 50)
@@ -453,7 +475,7 @@ def fetch_trending_shorts(target_count: int, region_code: str, country_name: str
     for _ in range(max_pages):
         search_kwargs: dict = dict(
             part="snippet",
-            q="#shorts",
+            q=country_cfg.get("q", "#shorts"),
             type="video",
             videoDuration="short",
             regionCode=region_code,
@@ -515,7 +537,8 @@ def fetch_trending_shorts(target_count: int, region_code: str, country_name: str
         comments = int(stats.get("commentCount", 0))
         age_h    = hours_since(pub_at)
         vel      = velocity_score(views, age_h)
-        niche    = categorise(title, desc)
+        niche          = categorise(title, desc)
+        content_format = tag_content_format(title, desc)
         pace_lbl, cpm, transition = pace_for_niche(niche)
         hooks    = generate_hooks(title, niche)
         age_str  = (f"{age_h:.0f}h ago" if age_h < 48 else f"{age_h/24:.0f}d ago")
@@ -524,6 +547,7 @@ def fetch_trending_shorts(target_count: int, region_code: str, country_name: str
             "id":             vid_id,
             "title":          title,
             "niche":          niche,
+            "content_format": content_format,
             "views":          views,
             "likes":          likes,
             "comments":       comments,
@@ -693,13 +717,22 @@ if not all_trends:
     st.stop()
 
 # ── Apply filters ─────────────────────────────────────────────────────────────
-all_niches = sorted(set(t["niche"] for t in all_trends))
+all_niches   = sorted(set(t["niche"]          for t in all_trends))
+all_formats  = sorted(set(t["content_format"] for t in all_trends))
 with st.sidebar:
-    selected_niches = st.multiselect("Niche", all_niches, default=all_niches)
+    selected_niches  = st.multiselect("Niche",  all_niches,  default=all_niches)
+    selected_formats = st.multiselect(
+        "🎯 Content Format",
+        all_formats,
+        default=all_formats,
+        help="Filter by creator format: stream clips, podcasts, or original short-form content",
+    )
 
 filtered = [
     t for t in all_trends
-    if t["niche"] in selected_niches and t["velocity_score"] >= min_vel
+    if t["niche"]          in selected_niches
+    and t["content_format"] in selected_formats
+    and t["velocity_score"] >= min_vel
 ]
 
 sort_map = {
@@ -777,6 +810,7 @@ for trend in filtered:
     <div>
       <span class="badge {trend['badge']}">{trend['hot_label']}</span>
       <span class="badge" style="background:#1e1e30;color:#a78bfa;">{trend['niche']}</span>
+      <span class="badge" style="background:#0d2d1a;color:#4ade80;border:1px solid #166534;">{trend['content_format']}</span>
     </div>
     <div style="color:#6b7280;font-size:.82rem;">posted {age_str}</div>
   </div>

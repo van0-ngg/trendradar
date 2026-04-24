@@ -30,6 +30,10 @@ _CLEAN_TITLE_RE = re.compile(r'[#\[\]@|]')
 _DEVANAGARI_RE    = re.compile(r'[ऀ-ॿঀ-৿઀-૿஀-௿ఀ-೿ഀ-ൿ]')
 _CJK_KANA_RE      = re.compile(r'[぀-ゟ゠-ヿ一-鿿㐀-䶿]')
 _CYRILLIC_RE      = re.compile(r'[Ѐ-ӿԀ-ԯ]')  # explicit Cyrillic geo-filter
+_HINGLISH_RE      = re.compile(
+    r'\b(?:ke|ko|ki|hai|mein|ne|aur|yeh|woh|bhai|desi|kya|hua|banayi)\b',
+    re.IGNORECASE,
+)
 
 _HOSTILE_RE = re.compile(
     r'[ऀ-ॿঀ-৿਀-૿଀-௿'
@@ -238,9 +242,11 @@ def is_target_language(title: str, desc: str, snippet: dict, country_cfg: dict) 
     script_mode  = country_cfg["script"]
     text = title + " " + desc[:100]
 
-    # ── Layer 0: Hard geo-filter (Cyrillic + Devanagari) for latin markets ───
+    # ── Layer 0: Hard geo-filter for latin markets ───────────────────────────
     if script_mode == "latin":
         if _CYRILLIC_RE.search(title) or _DEVANAGARI_RE.search(title):
+            return False
+        if _HINGLISH_RE.search(title):
             return False
 
     # ── Layer 1: YouTube metadata ─────────────────────────────────────────────

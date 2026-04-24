@@ -24,6 +24,10 @@ COUNTRIES: dict[str, dict] = {
     "🇯🇵 Japan":          {"code": "JP", "langs": frozenset(["ja"]),                              "rl": "ja",  "script": "cjk",    "q": "#shorts おすすめ トレンド"},
 }
 
+# Channel-country hard filter: applied only when target market is English-speaking
+BANNED_COUNTRIES: frozenset[str] = frozenset({"IN", "PK", "BD", "ID", "VN", "TH"})
+EN_MARKET_CODES:  frozenset[str] = frozenset({"US", "GB", "CA", "AU"})
+
 _LATIN_WORD_RE  = re.compile(r'[a-zA-Z]{3,}')
 _HAS_LATIN_RE   = re.compile(r'[a-zA-Z]')
 _CLEAN_TITLE_RE = re.compile(r'[#\[\]@|]')
@@ -515,6 +519,21 @@ def fetch_trending_shorts(target_count: int, region_code: str, country_name: str
         ).execute()
         all_items.extend(stats_resp.get("items", []))
 
+    # ── Step 2.5: channel → country lookup (batch, 50 IDs/request) ───────────
+    channel_countries: dict[str, str | None] = {}
+    apply_channel_filter = country_cfg["code"] in EN_MARKET_CODES
+    if apply_channel_filter:
+        channel_ids = list({item["snippet"]["channelId"] for item in all_items})
+        for i in range(0, len(channel_ids), 50):
+            batch = channel_ids[i : i + 50]
+            ch_resp = yt.channels().list(
+                part="snippet",
+                id=",".join(batch),
+                maxResults=50,
+            ).execute()
+            for ch in ch_resp.get("items", []):
+                channel_countries[ch["id"]] = ch["snippet"].get("country")
+
     # ── Step 3: filter, score, build result list ──────────────────────────────
     results: list[dict] = []
     for item in all_items:
@@ -524,6 +543,12 @@ def fetch_trending_shorts(target_count: int, region_code: str, country_name: str
         snippet = item["snippet"]
         title   = snippet.get("title", "Untitled")
         desc    = snippet.get("description", "")
+
+        # Hard channel-country filter — drop IN/PK/BD/ID/VN/TH channels in EN markets
+        if apply_channel_filter:
+            ch_country = channel_countries.get(snippet.get("channelId", ""))
+            if ch_country in BANNED_COUNTRIES:
+                continue
 
         if not is_target_language(title, desc, snippet, country_cfg):
             continue

@@ -858,39 +858,38 @@ for trend in filtered:
             st.image(trend["thumb"], use_container_width=True)
 
     with col_main:
-        safe_title = html.escape(trend["title"])
-        safe_niche = html.escape(trend["niche"])
-        suspect_html = (
-            '<span class="badge" style="background:#2d1a0d;color:#fb923c;'
-            'border:1px solid #9a3412;">⚠️ Suspect Engagement</span>'
+        safe_title = html.escape(trend["title"]).replace("\n", " ").replace("\r", "").strip()
+        safe_niche = html.escape(trend["niche"]).replace("\n", " ").replace("\r", "").strip()
+        suspect_badge = (
+            '<span class="badge" style="background:#2d1a0d;color:#fb923c;border:1px solid #9a3412;">⚠️ Suspect Engagement</span>'
             if trend.get("suspect_engagement") else ""
         )
-        st.markdown(f"""
-<div class="trend-card">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">
-    <div>
-      <span class="badge {trend['badge']}">{trend['hot_label']}</span>
-      <span class="badge" style="background:#1e1e30;color:#a78bfa;">{safe_niche}</span>
-      <span class="badge" style="background:#0d2d1a;color:#4ade80;border:1px solid #166534;">{trend['content_format']}</span>
-      {suspect_html}
-    </div>
-    <div style="color:#6b7280;font-size:.82rem;">posted {age_str}</div>
-  </div>
-  <h3 style="color:#f0f0ff;margin:14px 0 6px;font-size:1.1rem;">
-    <a href="{trend['url']}" target="_blank">{safe_title}</a>
-  </h3>
-  <div style="color:#9ca3af;font-size:.82rem;margin-bottom:6px;">Velocity Score</div>
-  <div style="display:flex;align-items:center;gap:12px;">
-    <div style="flex:1;background:#1e1e30;border-radius:999px;height:8px;">
-      <div style="width:{bar_w}%;height:8px;border-radius:999px;
-                  background:linear-gradient(90deg,#6c63ff,#e040fb);"></div>
-    </div>
-    <div style="font-size:1.4rem;font-weight:800;color:#a78bfa;min-width:52px;">
-      {vel}<span style="font-size:.75rem;color:#6b7280;">/100</span>
-    </div>
-  </div>
-</div>
-""", unsafe_allow_html=True)
+        card_html = (
+            f'<div class="trend-card">'
+            f'<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">'
+            f'<div>'
+            f'<span class="badge {trend["badge"]}">{trend["hot_label"]}</span>'
+            f'<span class="badge" style="background:#1e1e30;color:#a78bfa;">{safe_niche}</span>'
+            f'<span class="badge" style="background:#0d2d1a;color:#4ade80;border:1px solid #166534;">{trend["content_format"]}</span>'
+            f'{suspect_badge}'
+            f'</div>'
+            f'<div style="color:#6b7280;font-size:.82rem;">posted {age_str}</div>'
+            f'</div>'
+            f'<h3 style="color:#f0f0ff;margin:14px 0 6px;font-size:1.1rem;">'
+            f'<a href="{trend["url"]}" target="_blank">{safe_title}</a>'
+            f'</h3>'
+            f'<div style="color:#9ca3af;font-size:.82rem;margin-bottom:6px;">Velocity Score</div>'
+            f'<div style="display:flex;align-items:center;gap:12px;">'
+            f'<div style="flex:1;background:#1e1e30;border-radius:999px;height:8px;">'
+            f'<div style="width:{bar_w}%;height:8px;border-radius:999px;background:linear-gradient(90deg,#6c63ff,#e040fb);"></div>'
+            f'</div>'
+            f'<div style="font-size:1.4rem;font-weight:800;color:#a78bfa;min-width:52px;">'
+            f'{vel}<span style="font-size:.75rem;color:#6b7280;">/100</span>'
+            f'</div>'
+            f'</div>'
+            f'</div>'
+        )
+        st.markdown(card_html, unsafe_allow_html=True)
 
     s1, s2, s3, s4 = st.columns(4)
     s1.metric("👁️ Views",      format_count(trend["views"]))

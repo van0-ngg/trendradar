@@ -22,6 +22,7 @@ COUNTRIES: dict[str, dict] = {
     "🇫🇷 France":         {"code": "FR", "langs": frozenset(["fr"]),                               "rl": "fr",  "script": "latin"},
     "🇮🇳 India":          {"code": "IN", "langs": frozenset(["hi","en","ta","te","mr","bn","gu"]),  "rl": "hi",  "script": "india"},
     "🇯🇵 Japan":          {"code": "JP", "langs": frozenset(["ja"]),                               "rl": "ja",  "script": "cjk"},
+    "🇷🇺 Russia":         {"code": "RU", "langs": frozenset(["ru"]),                               "rl": "ru",  "script": "cyrillic"},
 }
 
 BANNED_COUNTRIES: frozenset[str] = frozenset({"IN", "PK", "BD", "ID", "VN", "TH"})
@@ -37,10 +38,17 @@ LOCAL_QUERIES: dict[str, dict] = {
     "DE": {"q": "#shorts deutsch OR trend",         "lang": "de"},
     "ES": {"q": "#shorts tendencia OR viral",       "lang": "es"},
     "FR": {"q": "#shorts tendance OR viral",        "lang": "fr"},
-    "IN": {"q": "#shorts india OR trending",        "lang": "hi"},
-    "JP": {"q": "#shorts トレンド",                  "lang": "ja"},
+    "IN": {"q": "#shorts india OR trending",                              "lang": "hi"},
+    "JP": {"q": "#shorts トレンド",                                        "lang": "ja"},
+    "RU": {"q": "#shorts тренд | топ | шортс | тикток | рекомендации",   "lang": "ru"},
 }
 _LOCAL_QUERY_DEFAULT = {"q": "#shorts", "lang": "en"}
+
+# Per-market anti-bot engagement threshold (EN strict, CIS moderate, others lenient)
+_BOT_THRESHOLDS: dict[str, float] = {
+    "US": 2.0, "GB": 2.0, "CA": 2.0, "AU": 2.0,  # English-speaking — strict
+    "RU": 1.5,                                      # CIS — moderate
+}
 
 _LATIN_WORD_RE  = re.compile(r'[a-zA-Z]{3,}')
 _HAS_LATIN_RE   = re.compile(r'[a-zA-Z]')
@@ -359,6 +367,11 @@ def is_target_language(title: str, desc: str, snippet: dict, country_cfg: dict) 
             return False
         return bool(_DEVANAGARI_RE.search(title)) or bool(_LATIN_WORD_RE.search(title))
 
+    if script_mode == "cyrillic":
+        if _CJK_KANA_RE.search(title) or _DEVANAGARI_RE.search(title):
+            return False
+        return bool(_CYRILLIC_RE.search(title))
+
     if _HOSTILE_RE.search(text):
         return False
     return bool(_LATIN_WORD_RE.search(title))
@@ -652,8 +665,8 @@ def fetch_trending_shorts(region_code: str, country_name: str) -> list[dict]:
         comments = int(stats.get("commentCount", 0))
         eng_rate = round((likes + comments) / max(views, 1) * 100, 2)
 
-        # Anti-bot: EN markets use 2.0% threshold; other markets 1.0% (lower organic baseline)
-        bot_threshold = 2.0 if country_cfg["code"] in EN_MARKET_CODES else 1.0
+        # Anti-bot: threshold varies by market (EN 2.0%, RU 1.5%, others 1.0%)
+        bot_threshold = _BOT_THRESHOLDS.get(country_cfg["code"], 1.0)
         if views > 10_000 and eng_rate < bot_threshold:
             continue
 

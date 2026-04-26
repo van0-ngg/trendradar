@@ -243,10 +243,33 @@ st.markdown("""
   section[data-testid="stSidebar"] .stSelectbox label,
   section[data-testid="stSidebar"] .stSlider label { color: #9ca3af !important; font-size:.85rem; }
 
+  /* ── Hide Streamlit chrome ── */
+  #MainMenu { visibility: hidden; }
+  footer    { visibility: hidden; }
+  header    { visibility: hidden; }
+
+  /* ── Stats grid inside trend card ── */
+  .stats-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 12px; margin: 18px 0 0;
+  }
+  .stat-item {
+    background: #0a0a14; border: 1px solid #1e1e30;
+    border-radius: 12px; padding: 12px 14px;
+    text-align: center; transition: border-color .2s;
+  }
+  .stat-item:hover { border-color: #6c63ff; }
+  .stat-icon  { font-size: 1rem; margin-bottom: 4px; display: block; }
+  .stat-value {
+    font-size: 1.2rem; font-weight: 800; color: #10b981;
+    line-height: 1.1; margin-bottom: 2px;
+  }
+  .stat-value.purple { color: #a78bfa; }
+  .stat-value.orange { color: #fb923c; }
+  .stat-value.blue   { color: #38bdf8; }
+  .stat-label { font-size: .68rem; color: #4b5563; font-weight: 600; letter-spacing:.04em; text-transform: uppercase; }
+
   /* ── Streamlit overrides ── */
-  .stMetric { background: #13131f; border: 1px solid #2a2a3e; border-radius: 14px; padding: 16px 20px; }
-  [data-testid="stMetricValue"] { color: #f0f0ff; font-weight: 800; }
-  [data-testid="stMetricLabel"] { color: #6b7280; font-size: .78rem; }
   div[data-testid="stExpander"] { background: #0f0f1a; border: 1px solid #2a2a3e; border-radius: 14px; }
   button[kind="primary"] { background: linear-gradient(90deg,#6c63ff,#e040fb) !important; border:none !important; }
 </style>
@@ -948,6 +971,7 @@ for trend in filtered:
         )
         card_html = (
             f'<div class="trend-card">'
+            # ── top row: badges + age ──
             f'<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">'
             f'<div>'
             f'<span class="badge {trend["badge"]}">{trend["hot_label"]}</span>'
@@ -955,29 +979,32 @@ for trend in filtered:
             f'<span class="badge" style="background:#0d2d1a;color:#4ade80;border:1px solid #166534;">{trend["content_format"]}</span>'
             f'{suspect_badge}'
             f'</div>'
-            f'<div style="color:#4b5563;font-size:.78rem;background:#0f0f1a;padding:3px 10px;border-radius:999px;">🕒 {age_str}</div>'
+            f'<div style="color:#4b5563;font-size:.78rem;background:#0a0a14;padding:3px 10px;border-radius:999px;border:1px solid #1e1e30;">🕒 {age_str}</div>'
             f'</div>'
-            f'<h3 style="color:#f0f0ff;margin:16px 0 8px;font-size:1.08rem;font-weight:700;line-height:1.4;">'
-            f'<a href="{trend["url"]}" target="_blank">{safe_title}</a>'
+            # ── title ──
+            f'<h3 style="color:#f0f0ff;margin:16px 0 4px;font-size:1.12rem;font-weight:800;line-height:1.4;letter-spacing:-.01em;">'
+            f'<a href="{trend["url"]}" target="_blank" style="color:#f0f0ff!important;">{safe_title}</a>'
             f'</h3>'
-            f'<div style="color:#6b7280;font-size:.75rem;margin-bottom:6px;letter-spacing:.05em;text-transform:uppercase;">Velocity Score</div>'
-            f'<div style="display:flex;align-items:center;gap:14px;">'
-            f'<div style="flex:1;background:#1e1e30;border-radius:999px;height:6px;">'
-            f'<div style="width:{bar_w}%;height:6px;border-radius:999px;background:linear-gradient(90deg,#6c63ff,#e040fb);box-shadow:0 0 8px rgba(108,99,255,.5);"></div>'
+            # ── velocity bar ──
+            f'<div style="color:#6b7280;font-size:.7rem;margin:12px 0 5px;letter-spacing:.06em;text-transform:uppercase;">🚀 Velocity Score</div>'
+            f'<div style="display:flex;align-items:center;gap:14px;margin-bottom:2px;">'
+            f'<div style="flex:1;background:#1e1e30;border-radius:999px;height:7px;">'
+            f'<div style="width:{bar_w}%;height:7px;border-radius:999px;background:linear-gradient(90deg,#6c63ff,#e040fb);box-shadow:0 0 10px rgba(108,99,255,.6);"></div>'
             f'</div>'
-            f'<div style="font-size:1.5rem;font-weight:900;color:#a78bfa;min-width:56px;text-align:right;">'
-            f'{vel}<span style="font-size:.7rem;color:#4b5563;font-weight:400;">/100</span>'
+            f'<div style="font-size:1.55rem;font-weight:900;color:#a78bfa;min-width:60px;text-align:right;line-height:1;">'
+            f'{vel}<span style="font-size:.68rem;color:#4b5563;font-weight:400;">/100</span>'
             f'</div>'
+            f'</div>'
+            # ── stats grid ──
+            f'<div class="stats-grid">'
+            f'<div class="stat-item"><span class="stat-icon">👁️</span><div class="stat-value">{format_count(trend["views"])}</div><div class="stat-label">Views</div></div>'
+            f'<div class="stat-item"><span class="stat-icon">❤️</span><div class="stat-value blue">{format_count(trend["likes"])}</div><div class="stat-label">Likes</div></div>'
+            f'<div class="stat-item"><span class="stat-icon">💬</span><div class="stat-value purple">{format_count(trend["comments"])}</div><div class="stat-label">Comments</div></div>'
+            f'<div class="stat-item"><span class="stat-icon">📊</span><div class="stat-value orange">{trend["engagement"]}%</div><div class="stat-label">Engagement</div></div>'
             f'</div>'
             f'</div>'
         )
         st.markdown(card_html, unsafe_allow_html=True)
-
-    s1, s2, s3, s4 = st.columns(4)
-    s1.metric("👁️ Views",       format_count(trend["views"]))
-    s2.metric("❤️ Likes",       format_count(trend["likes"]))
-    s3.metric("💬 Comments",    format_count(trend["comments"]))
-    s4.metric("📊 Engagement",  f"{trend['engagement']}%")
 
     with st.expander(f"🎬 CapCut Recipe — {trend['title'][:40]}…"):
         s = trend["sound"]

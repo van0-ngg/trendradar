@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import html
 import isodate
 import re
@@ -13,19 +13,17 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 # ── Country / Region config ───────────────────────────────────────────────────
-# q: localized search query sent to YouTube — boosts regional relevance
 COUNTRIES: dict[str, dict] = {
-    "🇺🇸 United States":  {"code": "US", "langs": frozenset(["en"]),                              "rl": "en",  "script": "latin",  "q": "#shorts trending viral"},
-    "🇬🇧 United Kingdom": {"code": "GB", "langs": frozenset(["en"]),                              "rl": "en",  "script": "latin",  "q": "#shorts trending viral"},
-    "🇪🇸 Spain":          {"code": "ES", "langs": frozenset(["es"]),                              "rl": "es",  "script": "latin",  "q": "#shorts tendencias viral"},
-    "🇧🇷 Brazil":         {"code": "BR", "langs": frozenset(["pt"]),                              "rl": "pt",  "script": "latin",  "q": "#shorts tendência viral"},
-    "🇩🇪 Germany":        {"code": "DE", "langs": frozenset(["de"]),                              "rl": "de",  "script": "latin",  "q": "#shorts trend viral"},
-    "🇫🇷 France":         {"code": "FR", "langs": frozenset(["fr"]),                              "rl": "fr",  "script": "latin",  "q": "#shorts tendance viral"},
-    "🇮🇳 India":          {"code": "IN", "langs": frozenset(["hi","en","ta","te","mr","bn","gu"]), "rl": "hi",  "script": "india",  "q": "#shorts trending viral"},
-    "🇯🇵 Japan":          {"code": "JP", "langs": frozenset(["ja"]),                              "rl": "ja",  "script": "cjk",    "q": "#shorts おすすめ トレンド"},
+    "🇺🇸 United States":  {"code": "US", "langs": frozenset(["en"]),                               "rl": "en",  "script": "latin"},
+    "🇬🇧 United Kingdom": {"code": "GB", "langs": frozenset(["en"]),                               "rl": "en",  "script": "latin"},
+    "🇪🇸 Spain":          {"code": "ES", "langs": frozenset(["es"]),                               "rl": "es",  "script": "latin"},
+    "🇧🇷 Brazil":         {"code": "BR", "langs": frozenset(["pt"]),                               "rl": "pt",  "script": "latin"},
+    "🇩🇪 Germany":        {"code": "DE", "langs": frozenset(["de"]),                               "rl": "de",  "script": "latin"},
+    "🇫🇷 France":         {"code": "FR", "langs": frozenset(["fr"]),                               "rl": "fr",  "script": "latin"},
+    "🇮🇳 India":          {"code": "IN", "langs": frozenset(["hi","en","ta","te","mr","bn","gu"]),  "rl": "hi",  "script": "india"},
+    "🇯🇵 Japan":          {"code": "JP", "langs": frozenset(["ja"]),                               "rl": "ja",  "script": "cjk"},
 }
 
-# Channel-country hard filter: applied only when target market is English-speaking
 BANNED_COUNTRIES: frozenset[str] = frozenset({"IN", "PK", "BD", "ID", "VN", "TH"})
 EN_MARKET_CODES:  frozenset[str] = frozenset({"US", "GB", "CA", "AU"})
 
@@ -35,13 +33,12 @@ _CLEAN_TITLE_RE = re.compile(r'[#\[\]@|]')
 
 _DEVANAGARI_RE    = re.compile(r'[ऀ-ॿঀ-৿઀-૿஀-௿ఀ-೿ഀ-ൿ]')
 _CJK_KANA_RE      = re.compile(r'[぀-ゟ゠-ヿ一-鿿㐀-䶿]')
-_CYRILLIC_RE      = re.compile(r'[Ѐ-ӿԀ-ԯ]')  # explicit Cyrillic geo-filter
+_CYRILLIC_RE      = re.compile(r'[Ѐ-ӿԀ-ԯ]')
 _HINGLISH_RE      = re.compile(
     r'\b(?:ke|ko|ki|hai|mein|ne|aur|yeh|woh|bhai|desi|kya|hua|banayi)\b',
     re.IGNORECASE,
 )
 
-# Content-format detection
 _STREAM_RE  = re.compile(
     r'\b(?:twitch|kick|stream(?:er|ing)?|gameplay|gaming|gta|minecraft|fortnite|'
     r'стрим|нарезка|live\s+stream|vod|esport)\b',
@@ -68,13 +65,12 @@ _INDIA_HOSTILE_RE = re.compile(
 )
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  CLIENT KEY DATABASE  (local JSON file)
+#  CLIENT KEY DATABASE
 # ══════════════════════════════════════════════════════════════════════════════
 
 CLIENTS_FILE = Path(__file__).parent / "clients.json"
 
 def _load_clients() -> list[dict]:
-    """Return list of client records: [{key, label, created_at}]."""
     if not CLIENTS_FILE.exists():
         CLIENTS_FILE.write_text("[]", encoding="utf-8")
     try:
@@ -86,7 +82,6 @@ def _save_clients(clients: list[dict]) -> None:
     CLIENTS_FILE.write_text(json.dumps(clients, indent=2, ensure_ascii=False), encoding="utf-8")
 
 def add_client_key(label: str = "") -> str:
-    """Generate a TR-XXXX-XXXX key, persist it, return the key string."""
     part = lambda: _secrets.token_hex(2).upper()
     new_key = f"TR-{part()}-{part()}"
     clients = _load_clients()
@@ -99,7 +94,6 @@ def add_client_key(label: str = "") -> str:
     return new_key
 
 def revoke_client_key(key: str) -> None:
-    """Remove a key from the database."""
     clients = [c for c in _load_clients() if c["key"] != key]
     _save_clients(clients)
 
@@ -118,78 +112,134 @@ st.set_page_config(
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
-  html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
 
+  html, body, [class*="css"] {
+    font-family: 'Inter', sans-serif;
+    background: #08080f;
+  }
+
+  /* ── Hero ── */
   .hero {
-    background: linear-gradient(135deg,#6c63ff 0%,#e040fb 50%,#ff5252 100%);
-    border-radius: 20px; padding: 36px 40px; margin-bottom: 28px;
-    box-shadow: 0 8px 32px rgba(108,99,255,.4);
+    background: linear-gradient(135deg, #6c63ff 0%, #e040fb 45%, #ff5252 100%);
+    border-radius: 24px; padding: 40px 44px; margin-bottom: 32px;
+    box-shadow: 0 12px 48px rgba(108,99,255,.45);
+    position: relative; overflow: hidden;
   }
-  .hero h1 { color:#fff; font-size:2.4rem; font-weight:800; margin:0; }
-  .hero p  { color:rgba(255,255,255,.85); font-size:1.05rem; margin:8px 0 0; }
-
-  .auth-container {
-    max-width: 440px; margin: 60px auto; padding: 40px;
-    background:#13131f; border:1px solid #2a2a3e; border-radius:20px;
-    box-shadow: 0 8px 32px rgba(0,0,0,.5);
+  .hero::before {
+    content: ""; position: absolute; inset: 0;
+    background: radial-gradient(ellipse at 70% 50%, rgba(255,255,255,.08) 0%, transparent 70%);
   }
-  .auth-container h2 { color:#f0f0ff; font-size:1.5rem; margin:0 0 8px; }
-  .auth-container p  { color:#9ca3af; font-size:.9rem; margin:0 0 24px; }
+  .hero h1 { color:#fff; font-size:2.6rem; font-weight:900; margin:0; letter-spacing:-.03em; }
+  .hero p  { color:rgba(255,255,255,.88); font-size:1.05rem; margin:10px 0 0; }
+  .hero-meta { color:rgba(255,255,255,.6); font-size:.8rem; margin:14px 0 0; display:flex; gap:16px; flex-wrap:wrap; }
+  .hero-meta span { background:rgba(0,0,0,.2); padding:3px 10px; border-radius:999px; }
 
+  /* ── Metric cards ── */
+  .metric-row { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:28px; }
+  .metric-card {
+    background: #13131f; border: 1px solid #2a2a3e;
+    border-radius: 18px; padding: 22px 24px;
+    transition: border-color .2s, transform .15s;
+  }
+  .metric-card:hover { border-color: #6c63ff; transform: translateY(-2px); }
+  .metric-card .label { color:#6b7280; font-size:.78rem; font-weight:600; letter-spacing:.06em; text-transform:uppercase; margin-bottom:6px; }
+  .metric-card .value { color:#f0f0ff; font-size:1.9rem; font-weight:800; line-height:1; }
+  .metric-card .sub   { color:#6b7280; font-size:.78rem; margin-top:4px; }
+  .metric-card.fire   { border-color:#ff5252; box-shadow:0 0 18px rgba(255,82,82,.12); }
+  .metric-card.fire .value { color:#ff5252; }
+  .metric-card.purple .value { color:#a78bfa; }
+  .metric-card.green  .value { color:#4ade80; }
+
+  /* ── Trend card ── */
   .trend-card {
-    background:#13131f; border:1px solid #2a2a3e; border-radius:20px;
-    padding:28px 32px; margin-bottom:20px; transition:border-color .2s;
+    background: linear-gradient(145deg, #13131f 0%, #0f0f1a 100%);
+    border: 1px solid #2a2a3e; border-radius: 22px;
+    padding: 26px 30px; margin-bottom: 4px;
+    transition: border-color .2s, box-shadow .2s;
   }
-  .trend-card:hover { border-color:#6c63ff; }
+  .trend-card:hover {
+    border-color: #6c63ff;
+    box-shadow: 0 4px 24px rgba(108,99,255,.15);
+  }
 
+  /* ── Badges ── */
   .badge {
-    display:inline-block; padding:4px 12px; border-radius:999px;
-    font-size:.75rem; font-weight:700; margin-right:8px;
+    display: inline-block; padding: 4px 12px; border-radius: 999px;
+    font-size: .72rem; font-weight: 700; margin-right: 6px; letter-spacing:.02em;
   }
-  .badge-fire   { background:#ff5252; color:#fff; }
-  .badge-rising { background:#ff9800; color:#fff; }
-  .badge-new    { background:#00bcd4; color:#fff; }
+  .badge-fire   { background: linear-gradient(90deg,#ff5252,#ff9800); color:#fff; }
+  .badge-rising { background: linear-gradient(90deg,#ff9800,#ffd600); color:#000; }
+  .badge-new    { background: linear-gradient(90deg,#00bcd4,#00e5ff); color:#000; }
 
+  /* ── Recipe blocks ── */
   .recipe-block {
-    background:#0d1117; border-left:4px solid #e040fb;
-    border-radius:0 12px 12px 0; padding:16px 20px; margin-top:16px;
+    background: #0d1117; border-left: 4px solid #e040fb;
+    border-radius: 0 14px 14px 0; padding: 18px 22px; margin-top: 14px;
   }
-  .recipe-block h4 { color:#e040fb; font-size:.9rem; margin:0 0 10px; letter-spacing:.08em; }
-
+  .recipe-block h4 {
+    color: #e040fb; font-size: .82rem; margin: 0 0 12px;
+    letter-spacing: .1em; text-transform: uppercase;
+  }
   .hook-box {
-    background:#161625; border:1px dashed #6c63ff; border-radius:10px;
-    padding:14px 16px; font-size:1rem; color:#f0f0ff;
-    font-style:italic; margin:10px 0;
+    background: #161625; border: 1px dashed #6c63ff; border-radius: 12px;
+    padding: 14px 18px; font-size: .95rem; color: #f0f0ff;
+    font-style: italic; margin: 10px 0; line-height: 1.5;
   }
   .sound-pill {
-    display:inline-flex; align-items:center; gap:8px;
-    background:#1e1e30; border:1px solid #6c63ff; border-radius:999px;
-    padding:6px 14px; font-size:.85rem; color:#a78bfa;
+    display: inline-flex; align-items: center; gap: 8px;
+    background: #1e1e30; border: 1px solid #6c63ff; border-radius: 999px;
+    padding: 6px 16px; font-size: .85rem; color: #a78bfa;
   }
-  .capcut-step { display:flex; align-items:flex-start; gap:14px; margin:8px 0; }
+  .capcut-step { display: flex; align-items: flex-start; gap: 14px; margin: 10px 0; }
   .step-num {
-    min-width:28px; height:28px;
-    background:linear-gradient(135deg,#6c63ff,#e040fb);
-    border-radius:50%; display:flex; align-items:center;
-    justify-content:center; font-size:.75rem; font-weight:700; color:#fff;
+    min-width: 28px; height: 28px;
+    background: linear-gradient(135deg, #6c63ff, #e040fb);
+    border-radius: 50%; display: flex; align-items: center;
+    justify-content: center; font-size: .72rem; font-weight: 800; color: #fff;
+    flex-shrink: 0;
   }
-  .step-text { color:#d1d5db; font-size:.88rem; line-height:1.5; }
-  .step-text strong { color:#f0f0ff; }
+  .step-text { color: #d1d5db; font-size: .88rem; line-height: 1.55; }
+  .step-text strong { color: #f0f0ff; }
 
-  a { color:#a78bfa !important; text-decoration:none; }
-  a:hover { text-decoration:underline; }
+  /* ── Auth ── */
+  .auth-wrap {
+    max-width: 420px; margin: 80px auto; padding: 44px;
+    background: #13131f; border: 1px solid #2a2a3e; border-radius: 24px;
+    box-shadow: 0 12px 48px rgba(0,0,0,.6);
+  }
 
+  /* ── Divider ── */
+  .section-divider {
+    height: 1px; background: linear-gradient(90deg,transparent,#2a2a3e,transparent);
+    margin: 28px 0;
+  }
+
+  /* ── Links ── */
+  a { color: #a78bfa !important; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* ── Sidebar ── */
   section[data-testid="stSidebar"] {
-    background:#0d0d18 !important; border-right:1px solid #1e1e30;
+    background: linear-gradient(180deg,#0a0a18 0%,#0d0d1f 100%) !important;
+    border-right: 1px solid #1e1e30;
   }
-  section[data-testid="stSidebar"] * { color:#d1d5db; }
+  section[data-testid="stSidebar"] * { color: #d1d5db; }
+  section[data-testid="stSidebar"] .stSelectbox label,
+  section[data-testid="stSidebar"] .stSlider label { color: #9ca3af !important; font-size:.85rem; }
+
+  /* ── Streamlit overrides ── */
+  .stMetric { background: #13131f; border: 1px solid #2a2a3e; border-radius: 14px; padding: 16px 20px; }
+  [data-testid="stMetricValue"] { color: #f0f0ff; font-weight: 800; }
+  [data-testid="stMetricLabel"] { color: #6b7280; font-size: .78rem; }
+  div[data-testid="stExpander"] { background: #0f0f1a; border: 1px solid #2a2a3e; border-radius: 14px; }
+  button[kind="primary"] { background: linear-gradient(90deg,#6c63ff,#e040fb) !important; border:none !important; }
 </style>
 """, unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  1. AUTH GATE — role-based (admin / user)
+#  AUTH GATE
 # ══════════════════════════════════════════════════════════════════════════════
 
 if "role" not in st.session_state:
@@ -197,18 +247,19 @@ if "role" not in st.session_state:
 
 if st.session_state["role"] is None:
     st.markdown("""
-<div class="hero">
-  <h1>🔐 TrendRadar</h1>
+<div class="hero" style="max-width:480px;margin:60px auto 0;">
+  <h1 style="font-size:2rem;">🔐 TrendRadar</h1>
   <p>Enter your access key to unlock the trend intelligence platform.</p>
 </div>
 """, unsafe_allow_html=True)
 
     _, col, _ = st.columns([1, 2, 1])
     with col:
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
         key_input = st.text_input(
             "Access Key",
             type="password",
-            placeholder="e.g. TR-A1B2-C3D4",
+            placeholder="TR-XXXX-XXXX",
             label_visibility="visible",
         )
         if st.button("🔓 Unlock Access", use_container_width=True, type="primary"):
@@ -221,7 +272,7 @@ if st.session_state["role"] is None:
                 st.session_state["role"] = "user"
                 st.rerun()
             else:
-                st.error("❌ Invalid access key. Please contact support to get one.")
+                st.error("❌ Invalid access key. Contact support to get one.")
         st.caption("Access keys are issued per client. Do not share yours.")
 
     st.stop()
@@ -235,45 +286,33 @@ def get_youtube():
     api_key = st.secrets.get("YOUTUBE_API_KEY", "")
     return build("youtube", "v3", developerKey=api_key, cache_discovery=False)
 
-def is_short(item):
-    duration_sec = 0
+def is_short(item: dict) -> bool:
+    """True if video is ≤ 60 s OR explicitly tagged #shorts."""
     raw = item["contentDetails"].get("duration", "PT0S")
     try:
         duration_sec = int(isodate.parse_duration(raw).total_seconds())
     except Exception:
-        pass
+        duration_sec = 0
     title = item["snippet"].get("title", "").lower()
     tags  = " ".join(item["snippet"].get("tags", [])).lower()
-    has_tag = "#shorts" in title or "#shorts" in tags or "#short" in title
-    return duration_sec <= 60 or has_tag
+    return duration_sec <= 60 or "#shorts" in title or "#short" in title or "#shorts" in tags
 
 def is_target_language(title: str, desc: str, snippet: dict, country_cfg: dict) -> bool:
-    """
-    Three-layer language filter + hard geo-filter for latin-script countries.
-
-    Layer 0 — Hard geo-filter : reject Cyrillic/Devanagari in title for EN/ES/PT/DE/FR markets
-    Layer 1 — YouTube metadata : fastest, most authoritative
-    Layer 2 — Script detection : Unicode range regex
-    Layer 3 — Minimum content : at least one real word in expected script
-    """
     target_langs = country_cfg["langs"]
     script_mode  = country_cfg["script"]
     text = title + " " + desc[:100]
 
-    # ── Layer 0: Hard geo-filter for latin markets ───────────────────────────
     if script_mode == "latin":
         if _CYRILLIC_RE.search(title) or _DEVANAGARI_RE.search(title):
             return False
         if _HINGLISH_RE.search(title):
             return False
 
-    # ── Layer 1: YouTube metadata ─────────────────────────────────────────────
     for field in ("defaultLanguage", "defaultAudioLanguage"):
         lang = (snippet.get(field) or "").split("-")[0].lower()
         if lang:
             return lang in target_langs
 
-    # ── Layer 2: Script presence / absence ───────────────────────────────────
     if script_mode == "cjk":
         return bool(_CJK_KANA_RE.search(title))
 
@@ -282,22 +321,19 @@ def is_target_language(title: str, desc: str, snippet: dict, country_cfg: dict) 
             return False
         return bool(_DEVANAGARI_RE.search(title)) or bool(_LATIN_WORD_RE.search(title))
 
-    # script_mode == "latin"
     if _HOSTILE_RE.search(text):
         return False
     return bool(_LATIN_WORD_RE.search(title))
 
 def hours_since(published_at: str) -> float:
     pub = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
-    now = datetime.now(timezone.utc)
-    return max((now - pub).total_seconds() / 3600, 0.1)
+    return max((datetime.now(timezone.utc) - pub).total_seconds() / 3600, 0.1)
 
 def velocity_score(views: int, age_hours: float) -> float:
     return round(views / age_hours, 0)
 
 def categorise(title: str, description: str) -> str:
     text = (title + " " + description).lower()
-    # AI & Tech is highest priority — checked before any script guard
     _AI_KEYWORDS = [
         "ai ", "chatgpt", "midjourney", "elevenlabs", "gpt", "нейросеть",
         "ии ", "heygen", "artificial intelligence", "openai",
@@ -307,14 +343,14 @@ def categorise(title: str, description: str) -> str:
     if not _HAS_LATIN_RE.search(title):
         return "General"
     rules = {
-        "Finance / Money":    ["money","income","salary","invest","crypto","earn","revenue","profit","rich","wealth"],
-        "Fitness / Health":   ["gym","workout","fitness","diet","calories","muscle","weight","run","exercise","sleep"],
-        "Productivity / AI":  ["productivity","notion","hack","workflow","automation","claude","tool"],
-        "Tech / Gadgets":     ["iphone","android","gadget","amazon","tech","review","unboxing","laptop","phone","device"],
-        "Creator Tools":      ["capcut","premiere","edit","youtube","tiktok","instagram","content","creator","viral","views"],
-        "Food / Recipe":      ["recipe","food","cook","meal","eat","drink","kitchen","chef","taste","bake"],
-        "Fashion / Beauty":   ["outfit","fashion","makeup","beauty","skincare","style","clothes","aesthetic","look","vibe"],
-        "Motivation":         ["motivat","mindset","success","hustle","grind","discipline","goals","life","change","growth"],
+        "Finance / Money":   ["money","income","salary","invest","crypto","earn","revenue","profit","rich","wealth"],
+        "Fitness / Health":  ["gym","workout","fitness","diet","calories","muscle","weight","run","exercise","sleep"],
+        "Productivity / AI": ["productivity","notion","hack","workflow","automation","claude","tool"],
+        "Tech / Gadgets":    ["iphone","android","gadget","amazon","tech","review","unboxing","laptop","phone","device"],
+        "Creator Tools":     ["capcut","premiere","edit","youtube","tiktok","instagram","content","creator","viral","views"],
+        "Food / Recipe":     ["recipe","food","cook","meal","eat","drink","kitchen","chef","taste","bake"],
+        "Fashion / Beauty":  ["outfit","fashion","makeup","beauty","skincare","style","clothes","aesthetic","look","vibe"],
+        "Motivation":        ["motivat","mindset","success","hustle","grind","discipline","goals","life","change","growth"],
     }
     for niche, keywords in rules.items():
         if any(k in text for k in keywords):
@@ -323,11 +359,9 @@ def categorise(title: str, description: str) -> str:
 
 def bpm_for_niche(niche: str) -> int:
     return {
-        "🤖 AI & Tech":     135,
-        "Finance / Money":  130, "Fitness / Health":   145,
-        "Productivity / AI":128, "Tech / Gadgets":     115,
-        "Creator Tools":    155, "Food / Recipe":      100,
-        "Fashion / Beauty": 120, "Motivation":         140,
+        "🤖 AI & Tech": 135, "Finance / Money": 130, "Fitness / Health": 145,
+        "Productivity / AI": 128, "Tech / Gadgets": 115, "Creator Tools": 155,
+        "Food / Recipe": 100, "Fashion / Beauty": 120, "Motivation": 140,
     }.get(niche, 120)
 
 def pace_for_niche(niche: str) -> tuple[str, int, str]:
@@ -336,15 +370,9 @@ def pace_for_niche(niche: str) -> tuple[str, int, str]:
     slow  = ("Slow & cinematic", 7, "Cross-dissolve")
     nfast = ("Fast cuts",      22, "Zoom + glitch")
     return {
-        "🤖 AI & Tech":      nfast,
-        "Finance / Money":   nfast,
-        "Fitness / Health":  fast,
-        "Productivity / AI": nfast,
-        "Tech / Gadgets":    med,
-        "Creator Tools":     fast,
-        "Food / Recipe":     slow,
-        "Fashion / Beauty":  med,
-        "Motivation":        fast,
+        "🤖 AI & Tech": nfast, "Finance / Money": nfast, "Fitness / Health": fast,
+        "Productivity / AI": nfast, "Tech / Gadgets": med, "Creator Tools": fast,
+        "Food / Recipe": slow, "Fashion / Beauty": med, "Motivation": fast,
     }.get(niche, med)
 
 def sound_for_niche(niche: str) -> dict:
@@ -360,7 +388,7 @@ def sound_for_niche(niche: str) -> dict:
         "Motivation":        {"name":"GODS","artist":"NewJeans","vibe":"Cinematic / Building","search":"NewJeans GODS shorts trending"},
         "General":           {"name":"Monkeys Spinning Monkeys","artist":"Kevin MacLeod","vibe":"Fun / Viral","search":"trending shorts sound 2024"},
     }
-    s = library.get(niche, library["General"])
+    s = dict(library.get(niche, library["General"]))
     s["bpm"] = bpm_for_niche(niche)
     s["link"] = f"https://www.youtube.com/results?search_query={s['search'].replace(' ', '+')}"
     return s
@@ -470,7 +498,6 @@ def badge_for_velocity(vel: float, max_vel: float) -> tuple[str, str]:
     return "🆕 NEW", "badge-new"
 
 def tag_content_format(title: str, desc: str) -> str:
-    """Classify video into a broad creator-format bucket."""
     text = title + " " + desc[:300]
     if _STREAM_RE.search(text):
         return "🎮 Stream / Gaming"
@@ -480,86 +507,39 @@ def tag_content_format(title: str, desc: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  2. FETCH DATA — pagination up to 200 videos (4 × 50)
+#  FETCH DATA  — uses videos.list(chart="mostPopular") = 1 quota unit/page
+#  4 pages × 50 = 200 candidates · ~8 total quota units per refresh
 # ══════════════════════════════════════════════════════════════════════════════
 
-@st.cache_data(ttl=900, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def fetch_trending_shorts(target_count: int, region_code: str, country_name: str) -> list[dict]:
     yt = get_youtube()
     country_cfg = COUNTRIES[country_name]
 
-    # ── Step 1: collect video IDs ─────────────────────────────────────────────
-    # EN markets: multi-query funnel to compensate for heavy filtering.
-    # Other markets: single localized query (fewer filters, less waste).
-    RAW_CAP = 450          # hard ceiling on raw IDs before expensive batch calls
-    published_after = (
-        datetime.now(timezone.utc).replace(microsecond=0) - timedelta(days=3)
-    ).isoformat()
+    # ── Step 1: pull mostPopular chart (1 quota unit per page) ───────────────
+    pages = max(1, target_count // 50)
+    all_items: list[dict] = []
+    page_token: str | None = None
 
-    if country_cfg["code"] in EN_MARKET_CODES:
-        queries = [
-            country_cfg.get("q", "#shorts trending viral"),
-            "#shorts viral",
-            "#shorts challenge",
-            "#shorts trend",
-        ]
-        pages_per_query = 3    # 3 × 50 = up to 150 raw IDs per query → ~600 before cap
-    else:
-        queries = [country_cfg.get("q", "#shorts")]
-        pages_per_query = max(1, target_count // 50)
-
-    seen_raw: set[str] = set()
-    unique_ids: list[str] = []
-
-    for query in queries:
-        if len(unique_ids) >= RAW_CAP:
+    for _ in range(pages):
+        kwargs: dict = dict(
+            part="snippet,statistics,contentDetails",
+            chart="mostPopular",
+            regionCode=region_code,
+            maxResults=50,
+        )
+        if page_token:
+            kwargs["pageToken"] = page_token
+        resp = yt.videos().list(**kwargs).execute()
+        all_items.extend(resp.get("items", []))
+        page_token = resp.get("nextPageToken")
+        if not page_token:
             break
-        page_token: str | None = None
-        for _ in range(pages_per_query):
-            if len(unique_ids) >= RAW_CAP:
-                break
-            search_kwargs: dict = dict(
-                part="snippet",
-                q=query,
-                type="video",
-                videoDuration="short",
-                regionCode=region_code,
-                order="viewCount",
-                maxResults=50,
-                publishedAfter=published_after,
-            )
-            if country_cfg["rl"]:
-                search_kwargs["relevanceLanguage"] = country_cfg["rl"]
-            if page_token:
-                search_kwargs["pageToken"] = page_token
 
-            search_resp = yt.search().list(**search_kwargs).execute()
-
-            for item in search_resp.get("items", []):
-                if item["id"].get("kind") == "youtube#video":
-                    vid = item["id"]["videoId"]
-                    if vid not in seen_raw:
-                        seen_raw.add(vid)
-                        unique_ids.append(vid)
-
-            page_token = search_resp.get("nextPageToken")
-            if not page_token:
-                break
-
-    if not unique_ids:
+    if not all_items:
         return []
 
-    # ── Step 2: fetch full details in batches of 50 ───────────────────────────
-    all_items: list[dict] = []
-    for i in range(0, len(unique_ids), 50):
-        batch = unique_ids[i : i + 50]
-        stats_resp = yt.videos().list(
-            part="snippet,statistics,contentDetails",
-            id=",".join(batch),
-        ).execute()
-        all_items.extend(stats_resp.get("items", []))
-
-    # ── Step 2.5: channel → country lookup (batch, 50 IDs/request) ───────────
+    # ── Step 2: channel → country lookup for EN markets (50 IDs/request) ────
     channel_countries: dict[str, str | None] = {}
     apply_channel_filter = country_cfg["code"] in EN_MARKET_CODES
     if apply_channel_filter:
@@ -574,7 +554,7 @@ def fetch_trending_shorts(target_count: int, region_code: str, country_name: str
             for ch in ch_resp.get("items", []):
                 channel_countries[ch["id"]] = ch["snippet"].get("country")
 
-    # ── Step 3: filter, score, build result list ──────────────────────────────
+    # ── Step 3: filter locally → only Shorts pass ────────────────────────────
     results: list[dict] = []
     for item in all_items:
         if not is_short(item):
@@ -584,7 +564,6 @@ def fetch_trending_shorts(target_count: int, region_code: str, country_name: str
         title   = snippet.get("title", "Untitled")
         desc    = snippet.get("description", "")
 
-        # Hard channel-country filter — drop IN/PK/BD/ID/VN/TH channels in EN markets
         if apply_channel_filter:
             ch_country = channel_countries.get(snippet.get("channelId", ""))
             if ch_country in BANNED_COUNTRIES:
@@ -593,9 +572,9 @@ def fetch_trending_shorts(target_count: int, region_code: str, country_name: str
         if not is_target_language(title, desc, snippet, country_cfg):
             continue
 
-        stats    = item.get("statistics", {})
-        pub_at   = snippet.get("publishedAt", "")
-        vid_id   = item["id"]
+        stats  = item.get("statistics", {})
+        pub_at = snippet.get("publishedAt", "")
+        vid_id = item["id"]
 
         views    = int(stats.get("viewCount", 0))
         likes    = int(stats.get("likeCount", 0))
@@ -608,37 +587,36 @@ def fetch_trending_shorts(target_count: int, region_code: str, country_name: str
 
         suspect_engagement = views > 1_000 and eng_rate < 3.5
 
-        age_h    = hours_since(pub_at)
-        vel      = velocity_score(views, age_h)
+        age_h          = hours_since(pub_at)
+        vel            = velocity_score(views, age_h)
         niche          = categorise(title, desc)
         content_format = tag_content_format(title, desc)
         pace_lbl, cpm, transition = pace_for_niche(niche)
-        hooks    = generate_hooks(title, niche)
-        age_str  = (f"{age_h:.0f}h ago" if age_h < 48 else f"{age_h/24:.0f}d ago")
+        age_str        = f"{age_h:.0f}h ago" if age_h < 48 else f"{age_h/24:.0f}d ago"
 
         results.append({
-            "id":             vid_id,
-            "title":          title,
-            "niche":          niche,
-            "content_format": content_format,
-            "views":          views,
-            "likes":          likes,
-            "comments":       comments,
-            "age_hours":      round(age_h, 1),
-            "age_str":        age_str,
-            "velocity":       vel,
-            "velocity_score":      0.0,
-            "engagement":          eng_rate,
-            "suspect_engagement":  suspect_engagement,
-            "sound":          sound_for_niche(niche),
-            "pace_label":     pace_lbl,
-            "cuts_per_min":   cpm,
-            "transition":     transition,
-            "hooks":          hooks,
-            "capcut_steps":   generate_capcut_steps(niche, title),
-            "mj_prompt":      generate_mj_prompt(title, niche),
-            "thumb":          snippet.get("thumbnails", {}).get("high", {}).get("url", ""),
-            "url":            f"https://youtube.com/shorts/{vid_id}",
+            "id":               vid_id,
+            "title":            title,
+            "niche":            niche,
+            "content_format":   content_format,
+            "views":            views,
+            "likes":            likes,
+            "comments":         comments,
+            "age_hours":        round(age_h, 1),
+            "age_str":          age_str,
+            "velocity":         vel,
+            "velocity_score":   0.0,
+            "engagement":       eng_rate,
+            "suspect_engagement": suspect_engagement,
+            "sound":            sound_for_niche(niche),
+            "pace_label":       pace_lbl,
+            "cuts_per_min":     cpm,
+            "transition":       transition,
+            "hooks":            generate_hooks(title, niche),
+            "capcut_steps":     generate_capcut_steps(niche, title),
+            "mj_prompt":        generate_mj_prompt(title, niche),
+            "thumb":            snippet.get("thumbnails", {}).get("high", {}).get("url", ""),
+            "url":              f"https://youtube.com/shorts/{vid_id}",
         })
 
     if results:
@@ -655,37 +633,42 @@ def fetch_trending_shorts(target_count: int, region_code: str, country_name: str
 # ══════════════════════════════════════════════════════════════════════════════
 
 with st.sidebar:
-    # ── Role badge ────────────────────────────────────────────────────────────
     role = st.session_state["role"]
+
     if role == "admin":
         st.markdown(
-            '<div style="background:#1e1e30;border:1px solid #6c63ff;border-radius:8px;'
-            'padding:6px 12px;font-size:.8rem;color:#a78bfa;margin-bottom:8px;">'
+            '<div style="background:linear-gradient(90deg,#1a1a35,#1e1530);border:1px solid #6c63ff;'
+            'border-radius:10px;padding:8px 14px;font-size:.8rem;color:#a78bfa;margin-bottom:12px;">'
             '🛡️ Logged in as <strong>Admin</strong></div>',
             unsafe_allow_html=True,
         )
     else:
         st.markdown(
-            '<div style="background:#1e1e30;border:1px solid #2a2a3e;border-radius:8px;'
-            'padding:6px 12px;font-size:.8rem;color:#6b7280;margin-bottom:8px;">'
+            '<div style="background:#13131f;border:1px solid #2a2a3e;border-radius:10px;'
+            'padding:8px 14px;font-size:.8rem;color:#6b7280;margin-bottom:12px;">'
             '👤 Logged in as <strong>Client</strong></div>',
             unsafe_allow_html=True,
         )
 
-    st.markdown("## ⚙️ Filters")
-    st.markdown("---")
+    st.markdown("### ⚙️ Controls")
 
     country_name = st.selectbox(
-        "🌍 Country / Region",
+        "🌍 Market",
         list(COUNTRIES.keys()),
         index=0,
-        help="Filters both the YouTube API region and the language of results",
+        help="Filters YouTube trending chart by region",
     )
     selected_country = COUNTRIES[country_name]
 
+    sort_by = st.selectbox(
+        "📊 Sort by",
+        ["🚀 Velocity Score", "👁️ Total Views", "❤️ Engagement Rate"],
+    )
+    min_vel = st.slider("Min Velocity Score", 0, 100, 0, 5)
+
     col_refresh, col_logout = st.columns([3, 2])
     with col_refresh:
-        if st.button("🔄 Refresh data", use_container_width=True):
+        if st.button("🔄 Refresh", use_container_width=True, type="primary"):
             st.cache_data.clear()
             st.rerun()
     with col_logout:
@@ -693,55 +676,42 @@ with st.sidebar:
             st.session_state["role"] = None
             st.rerun()
 
-    sort_by = st.selectbox(
-        "Sort by",
-        ["🚀 Velocity Score", "👁️ Total Views", "❤️ Engagement Rate"],
-    )
-    min_vel = st.slider("Min Velocity Score", 0, 100, 0, 5)
-
     st.markdown("---")
     st.markdown("### 📖 How to use")
     st.markdown("""
-1. Pick your **Country** at the top
+1. Pick your **Market** above
 2. Sort by **Velocity Score** — top = blowing up *right now*
 3. Open **CapCut Recipe** for a ready-made script
 4. Use one of the **Hook Texts** as your opening frame
-5. Post within **24h** of the trend peak
+5. Post within **24 h** of the trend peak
     """)
     st.markdown("---")
-    st.caption("🔄 Live data · refreshes every 15 min\nv0.6 · TrendRadar · Global")
+    st.caption("🔄 Cache: 1 h · ~8 API quota units/refresh\nv0.7 · TrendRadar · Global")
 
-    # ── Admin Dashboard ───────────────────────────────────────────────────────
     if role == "admin":
         st.markdown("---")
         with st.expander("🛠️ Admin Dashboard", expanded=True):
-            # Generate new key
             st.markdown("**Generate Client Key**")
             new_label = st.text_input(
                 "Client label (optional)",
                 placeholder="e.g. John Smith / Agency X",
                 key="admin_label",
             )
-            if st.button("➕ Generate New Client Key", use_container_width=True, type="primary"):
-                new_key = add_client_key(label=new_label)
-                st.session_state["last_generated_key"] = new_key
+            if st.button("➕ Generate New Key", use_container_width=True, type="primary"):
+                st.session_state["last_generated_key"] = add_client_key(label=new_label)
 
             if "last_generated_key" in st.session_state:
-                st.success(f"New key generated — copy it now:")
+                st.success("New key generated — copy it now:")
                 st.code(st.session_state["last_generated_key"], language=None)
 
             st.markdown("---")
-
-            # Clear cache
             if st.button("🗑️ Clear Global Cache", use_container_width=True):
                 st.cache_data.clear()
                 st.success("Cache cleared.")
 
             st.markdown("---")
-
-            # Active client keys
             clients = _load_clients()
-            st.markdown(f"**Active Client Keys** ({len(clients)})")
+            st.markdown(f"**Active Keys** ({len(clients)})")
             if not clients:
                 st.caption("No client keys yet.")
             else:
@@ -749,14 +719,12 @@ with st.sidebar:
                     col_info, col_btn = st.columns([3, 1])
                     with col_info:
                         st.markdown(
-                            f'<div style="font-size:.8rem;color:#a78bfa;font-family:monospace;">'
-                            f'{c["key"]}</div>'
-                            f'<div style="font-size:.72rem;color:#6b7280;">'
-                            f'{c.get("label","")} · {c.get("created_at","")}</div>',
+                            f'<div style="font-size:.78rem;color:#a78bfa;font-family:monospace;">{c["key"]}</div>'
+                            f'<div style="font-size:.7rem;color:#6b7280;">{c.get("label","")} · {c.get("created_at","")}</div>',
                             unsafe_allow_html=True,
                         )
                     with col_btn:
-                        if st.button("✕", key=f"revoke_{c['key']}", help="Revoke access"):
+                        if st.button("✕", key=f"revoke_{c['key']}", help="Revoke"):
                             revoke_client_key(c["key"])
                             if st.session_state.get("last_generated_key") == c["key"]:
                                 del st.session_state["last_generated_key"]
@@ -767,19 +735,26 @@ with st.sidebar:
 #  HEADER
 # ══════════════════════════════════════════════════════════════════════════════
 
-st.markdown(f"""
-<div class="hero">
-  <h1>🚀 TrendRadar</h1>
-  <p>Global YouTube Shorts velocity engine — pick a country, find what's going viral <em>right now</em>, get a ready-made CapCut recipe.</p>
-</div>
-""", unsafe_allow_html=True)
+now_str = datetime.now(timezone.utc).strftime("%H:%M UTC")
+st.markdown(
+    f'<div class="hero">'
+    f'<h1>🚀 TrendRadar</h1>'
+    f'<p>Official YouTube trending chart · {country_name} · real engagement only · CapCut recipe included.</p>'
+    f'<div class="hero-meta">'
+    f'<span>📡 Live data</span>'
+    f'<span>🕒 Refreshed at {now_str}</span>'
+    f'<span>💡 ~8 API quota units/hour</span>'
+    f'<span>🔒 1-hour cache</span>'
+    f'</div></div>',
+    unsafe_allow_html=True,
+)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  LOAD DATA  (200 videos = 4 pages × 50)
+#  LOAD DATA
 # ══════════════════════════════════════════════════════════════════════════════
 
-with st.spinner(f"Fetching up to 200 live Shorts for {country_name}…"):
+with st.spinner(f"Loading official trending chart for {country_name}…"):
     try:
         all_trends = fetch_trending_shorts(200, selected_country["code"], country_name)
     except HttpError as e:
@@ -787,19 +762,19 @@ with st.spinner(f"Fetching up to 200 live Shorts for {country_name}…"):
         st.stop()
 
 if not all_trends:
-    st.warning("No Shorts found in current trending list. Try refreshing.")
+    st.warning("No Shorts found in the current trending chart. Try another market or refresh.")
     st.stop()
 
-# ── Apply filters ─────────────────────────────────────────────────────────────
-all_niches   = sorted(set(t["niche"]          for t in all_trends))
-all_formats  = sorted(set(t["content_format"] for t in all_trends))
+# ── Sidebar filters (need data first) ────────────────────────────────────────
+all_niches  = sorted(set(t["niche"]          for t in all_trends))
+all_formats = sorted(set(t["content_format"] for t in all_trends))
 with st.sidebar:
+    st.markdown("---")
+    st.markdown("### 🔎 Filters")
     selected_niches  = st.multiselect("Niche",  all_niches,  default=all_niches)
     selected_formats = st.multiselect(
-        "🎯 Content Format",
-        all_formats,
-        default=all_formats,
-        help="Filter by creator format: stream clips, podcasts, or original short-form content",
+        "Content Format", all_formats, default=all_formats,
+        help="Original creator content, stream clips, or podcast snippets",
     )
 
 filtered = [
@@ -818,48 +793,81 @@ filtered.sort(key=sort_map[sort_by], reverse=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  SUMMARY METRICS
+#  METRICS
 # ══════════════════════════════════════════════════════════════════════════════
 
 total_views = sum(t["views"] for t in filtered)
 avg_vel     = round(sum(t["velocity_score"] for t in filtered) / max(len(filtered), 1), 1)
 fire_count  = sum(1 for t in filtered if t["badge"] == "badge-fire")
 top_niche   = max(filtered, key=lambda t: t["velocity_score"])["niche"].split("/")[0].strip() if filtered else "—"
+avg_eng     = round(sum(t["engagement"] for t in filtered) / max(len(filtered), 1), 1)
 
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("🔥 Viral Now",    fire_count)
-c2.metric("📊 Avg Velocity", f"{avg_vel}/100")
-c3.metric("👁️ Total Views",  format_count(total_views))
-c4.metric("🏆 Top Niche",    top_niche)
-
-st.markdown("<br>", unsafe_allow_html=True)
-
-
-# ── Velocity chart ────────────────────────────────────────────────────────────
-with st.expander("📈 Velocity Chart — compare all trends", expanded=False):
-    df = pd.DataFrame([{
-        "Title": t["title"][:42] + "…" if len(t["title"]) > 42 else t["title"],
-        "Velocity Score": t["velocity_score"],
-        "Niche": t["niche"],
-    } for t in filtered[:20]])
-    fig = px.bar(
-        df, x="Velocity Score", y="Title", color="Niche",
-        orientation="h", text="Velocity Score",
-        color_discrete_sequence=["#6c63ff","#e040fb","#ff5252","#ff9800","#00bcd4","#4caf50","#f06292","#80cbc4"],
-    )
-    fig.update_layout(
-        paper_bgcolor="#0a0a0f", plot_bgcolor="#13131f",
-        font_color="#d1d5db", height=420,
-        margin=dict(l=0, r=20, t=10, b=10),
-        yaxis=dict(tickfont=dict(size=10)),
-        legend=dict(bgcolor="#0a0a0f", bordercolor="#2a2a3e"),
-    )
-    fig.update_traces(textposition="outside", textfont_color="#f0f0ff")
-    st.plotly_chart(fig, use_container_width=True)
+st.markdown(
+    f'<div class="metric-row">'
+    f'<div class="metric-card fire"><div class="label">🔥 Viral Now</div><div class="value">{fire_count}</div><div class="sub">badge-fire videos</div></div>'
+    f'<div class="metric-card purple"><div class="label">🚀 Avg Velocity</div><div class="value">{avg_vel}<span style="font-size:1rem;font-weight:600">/100</span></div><div class="sub">normalised score</div></div>'
+    f'<div class="metric-card green"><div class="label">👁️ Total Views</div><div class="value">{format_count(total_views)}</div><div class="sub">combined reach</div></div>'
+    f'<div class="metric-card"><div class="label">❤️ Avg Engagement</div><div class="value">{avg_eng}<span style="font-size:1rem;font-weight:600">%</span></div><div class="sub">top niche: {top_niche}</div></div>'
+    f'</div>',
+    unsafe_allow_html=True,
+)
 
 
-st.markdown(f"### Found **{len(filtered)}** trending Shorts")
-st.markdown("---")
+# ══════════════════════════════════════════════════════════════════════════════
+#  VELOCITY CHART + CSV EXPORT
+# ══════════════════════════════════════════════════════════════════════════════
+
+col_chart, col_export = st.columns([5, 1])
+
+with col_chart:
+    with st.expander("📈 Velocity Chart — top 20", expanded=False):
+        df_chart = pd.DataFrame([{
+            "Title": (t["title"][:40] + "…") if len(t["title"]) > 40 else t["title"],
+            "Velocity Score": t["velocity_score"],
+            "Niche": t["niche"],
+        } for t in filtered[:20]])
+        fig = px.bar(
+            df_chart, x="Velocity Score", y="Title", color="Niche",
+            orientation="h", text="Velocity Score",
+            color_discrete_sequence=["#6c63ff","#e040fb","#ff5252","#ff9800","#00bcd4","#4caf50","#f06292","#80cbc4"],
+        )
+        fig.update_layout(
+            paper_bgcolor="#08080f", plot_bgcolor="#13131f",
+            font_color="#d1d5db", height=440,
+            margin=dict(l=0, r=24, t=10, b=10),
+            yaxis=dict(tickfont=dict(size=10)),
+            legend=dict(bgcolor="#08080f", bordercolor="#2a2a3e"),
+        )
+        fig.update_traces(textposition="outside", textfont_color="#f0f0ff")
+        st.plotly_chart(fig, use_container_width=True)
+
+with col_export:
+    st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+    if filtered:
+        csv_df = pd.DataFrame([{
+            "Title":          t["title"],
+            "URL":            t["url"],
+            "Niche":          t["niche"],
+            "Format":         t["content_format"],
+            "Views":          t["views"],
+            "Likes":          t["likes"],
+            "Comments":       t["comments"],
+            "Engagement %":   t["engagement"],
+            "Velocity Score": t["velocity_score"],
+            "Age (hours)":    t["age_hours"],
+            "Hot Label":      t["hot_label"],
+        } for t in filtered])
+        st.download_button(
+            label="⬇️ Export CSV",
+            data=csv_df.to_csv(index=False).encode("utf-8"),
+            file_name=f"trendradar_{selected_country['code']}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+
+
+st.markdown(f"### Found **{len(filtered)}** Shorts in the official trending chart")
+st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -867,8 +875,8 @@ st.markdown("---")
 # ══════════════════════════════════════════════════════════════════════════════
 
 for trend in filtered:
-    vel   = trend["velocity_score"]
-    bar_w = int(vel)
+    vel     = trend["velocity_score"]
+    bar_w   = int(vel)
     age_str = trend["age_str"]
 
     col_img, col_main = st.columns([1, 5])
@@ -889,22 +897,22 @@ for trend in filtered:
             f'<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">'
             f'<div>'
             f'<span class="badge {trend["badge"]}">{trend["hot_label"]}</span>'
-            f'<span class="badge" style="background:#1e1e30;color:#a78bfa;">{safe_niche}</span>'
+            f'<span class="badge" style="background:#1a1a35;color:#a78bfa;border:1px solid #3a3a6e;">{safe_niche}</span>'
             f'<span class="badge" style="background:#0d2d1a;color:#4ade80;border:1px solid #166534;">{trend["content_format"]}</span>'
             f'{suspect_badge}'
             f'</div>'
-            f'<div style="color:#6b7280;font-size:.82rem;">posted {age_str}</div>'
+            f'<div style="color:#4b5563;font-size:.78rem;background:#0f0f1a;padding:3px 10px;border-radius:999px;">🕒 {age_str}</div>'
             f'</div>'
-            f'<h3 style="color:#f0f0ff;margin:14px 0 6px;font-size:1.1rem;">'
+            f'<h3 style="color:#f0f0ff;margin:16px 0 8px;font-size:1.08rem;font-weight:700;line-height:1.4;">'
             f'<a href="{trend["url"]}" target="_blank">{safe_title}</a>'
             f'</h3>'
-            f'<div style="color:#9ca3af;font-size:.82rem;margin-bottom:6px;">Velocity Score</div>'
-            f'<div style="display:flex;align-items:center;gap:12px;">'
-            f'<div style="flex:1;background:#1e1e30;border-radius:999px;height:8px;">'
-            f'<div style="width:{bar_w}%;height:8px;border-radius:999px;background:linear-gradient(90deg,#6c63ff,#e040fb);"></div>'
+            f'<div style="color:#6b7280;font-size:.75rem;margin-bottom:6px;letter-spacing:.05em;text-transform:uppercase;">Velocity Score</div>'
+            f'<div style="display:flex;align-items:center;gap:14px;">'
+            f'<div style="flex:1;background:#1e1e30;border-radius:999px;height:6px;">'
+            f'<div style="width:{bar_w}%;height:6px;border-radius:999px;background:linear-gradient(90deg,#6c63ff,#e040fb);box-shadow:0 0 8px rgba(108,99,255,.5);"></div>'
             f'</div>'
-            f'<div style="font-size:1.4rem;font-weight:800;color:#a78bfa;min-width:52px;">'
-            f'{vel}<span style="font-size:.75rem;color:#6b7280;">/100</span>'
+            f'<div style="font-size:1.5rem;font-weight:900;color:#a78bfa;min-width:56px;text-align:right;">'
+            f'{vel}<span style="font-size:.7rem;color:#4b5563;font-weight:400;">/100</span>'
             f'</div>'
             f'</div>'
             f'</div>'
@@ -912,95 +920,85 @@ for trend in filtered:
         st.markdown(card_html, unsafe_allow_html=True)
 
     s1, s2, s3, s4 = st.columns(4)
-    s1.metric("👁️ Views",      format_count(trend["views"]))
-    s2.metric("❤️ Likes",      format_count(trend["likes"]))
-    s3.metric("💬 Comments",   format_count(trend["comments"]))
-    s4.metric("❤️ Engagement", f"{trend['engagement']}%")
+    s1.metric("👁️ Views",       format_count(trend["views"]))
+    s2.metric("❤️ Likes",       format_count(trend["likes"]))
+    s3.metric("💬 Comments",    format_count(trend["comments"]))
+    s4.metric("📊 Engagement",  f"{trend['engagement']}%")
 
     with st.expander(f"🎬 CapCut Recipe — {trend['title'][:40]}…"):
         s = trend["sound"]
         tab1, tab2, tab3, tab4 = st.tabs(["🎵 Sound & Pace", "📝 Hook Texts", "🎬 CapCut Steps", "🎨 Midjourney"])
 
         with tab1:
-            st.markdown(f"""
-<div class="recipe-block">
-  <h4>🎵 RECOMMENDED SOUND</h4>
-  <div class="sound-pill">🎵 {s['name']} — {s['artist']}</div>
-  <p style="color:#9ca3af;font-size:.85rem;margin:10px 0 4px;">
-    BPM: <strong style="color:#f0f0ff">{s['bpm']}</strong> &nbsp;|&nbsp;
-    Vibe: <strong style="color:#f0f0ff">{s['vibe']}</strong>
-  </p>
-  <a href="{s['link']}" target="_blank">🔍 Find on YouTube →</a>
-</div>
-<div class="recipe-block" style="margin-top:12px;border-color:#6c63ff;">
-  <h4 style="color:#a78bfa;">✂️ EDITING PACE</h4>
-  <p style="color:#f0f0ff;font-size:1rem;margin:0;"><strong>{trend['pace_label']}</strong></p>
-  <p style="color:#9ca3af;font-size:.85rem;margin:6px 0 0;">
-    ~{trend['cuts_per_min']} cuts/min &nbsp;|&nbsp;
-    Transition: <strong style="color:#f0f0ff">{trend['transition']}</strong>
-  </p>
-</div>
-""", unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="recipe-block">'
+                f'<h4>🎵 Recommended Sound</h4>'
+                f'<div class="sound-pill">🎵 {s["name"]} — {s["artist"]}</div>'
+                f'<p style="color:#9ca3af;font-size:.85rem;margin:12px 0 4px;">'
+                f'BPM: <strong style="color:#f0f0ff">{s["bpm"]}</strong> &nbsp;|&nbsp; Vibe: <strong style="color:#f0f0ff">{s["vibe"]}</strong>'
+                f'</p><a href="{s["link"]}" target="_blank">🔍 Find on YouTube →</a></div>'
+                f'<div class="recipe-block" style="margin-top:12px;border-color:#6c63ff;">'
+                f'<h4 style="color:#a78bfa;">✂️ Editing Pace</h4>'
+                f'<p style="color:#f0f0ff;font-size:1rem;margin:0;"><strong>{trend["pace_label"]}</strong></p>'
+                f'<p style="color:#9ca3af;font-size:.85rem;margin:6px 0 0;">'
+                f'~{trend["cuts_per_min"]} cuts/min &nbsp;|&nbsp; Transition: <strong style="color:#f0f0ff">{trend["transition"]}</strong>'
+                f'</p></div>',
+                unsafe_allow_html=True,
+            )
 
         with tab2:
-            st.markdown("<div class='recipe-block'><h4>📝 HOOK OPTIONS — paste into CapCut text layer</h4>", unsafe_allow_html=True)
+            st.markdown('<div class="recipe-block"><h4>📝 Hook Options — paste into CapCut text layer</h4>', unsafe_allow_html=True)
             for hook in trend["hooks"]:
-                st.markdown(f'<div class="hook-box">"{hook}"</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="hook-box">"{html.escape(hook)}"</div>', unsafe_allow_html=True)
             st.markdown("</div>", unsafe_allow_html=True)
             st.info("💡 Use the hook as your FIRST text on screen (0:00–0:02). Big bold white font on dark background.")
 
         with tab3:
-            st.markdown("<div class='recipe-block'><h4>🎬 CAPCUT STEP-BY-STEP SCRIPT</h4>", unsafe_allow_html=True)
+            st.markdown('<div class="recipe-block"><h4>🎬 CapCut Step-by-Step Script</h4>', unsafe_allow_html=True)
             for i, (tc, instr) in enumerate(trend["capcut_steps"], 1):
-                st.markdown(f"""
-<div class="capcut-step">
-  <div class="step-num">{i}</div>
-  <div class="step-text"><strong>{tc}</strong><br>{instr}</div>
-</div>""", unsafe_allow_html=True)
+                st.markdown(
+                    f'<div class="capcut-step">'
+                    f'<div class="step-num">{i}</div>'
+                    f'<div class="step-text"><strong>{tc}</strong><br>{instr}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
             st.markdown("</div>", unsafe_allow_html=True)
             st.success("✅ Total: 30 seconds | Optimized for YouTube Shorts algorithm")
 
         with tab4:
-            st.markdown("<div class='recipe-block' style='border-color:#a78bfa;'><h4 style='color:#a78bfa;'>🎨 MIDJOURNEY BACKGROUND PROMPT</h4>", unsafe_allow_html=True)
-            st.markdown("<p style='color:#9ca3af;font-size:.85rem;margin:0 0 10px;'>Paste into Midjourney to generate a 9:16 cinematic background for your Short.</p>", unsafe_allow_html=True)
-            st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown(
+                '<div class="recipe-block" style="border-color:#a78bfa;">'
+                '<h4 style="color:#a78bfa;">🎨 Midjourney Background Prompt</h4>'
+                '<p style="color:#9ca3af;font-size:.85rem;margin:0 0 10px;">Paste into Midjourney to generate a 9:16 cinematic background.</p>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
             st.code(trend["mj_prompt"], language=None)
-            st.caption("Click the copy icon (top-right of the box above) → paste into Midjourney Discord")
+            st.caption("Copy icon (top-right) → paste into Midjourney Discord")
 
         st.markdown("---")
         st.markdown("##### 📋 Full Recipe — copy everything at once")
-
-        full_recipe = f"""TREND: {trend['title']}
-URL: {trend['url']}
-Niche: {trend['niche']} | Velocity: {trend['velocity_score']}/100
-
-━━━ HOOK TEXT (use at 0:00–0:02) ━━━
-{trend['hooks'][0]}
-
-━━━ SOUND ━━━
-{s['name']} — {s['artist']}
-BPM: {s['bpm']} | Vibe: {s['vibe']}
-Find it: {s['link']}
-
-━━━ EDITING PACE ━━━
-{trend['pace_label']} (~{trend['cuts_per_min']} cuts/min)
-Transition: {trend['transition']}
-
-━━━ CAPCUT SCRIPT ━━━
-{chr(10).join(f"{tc}  {instr}" for tc, instr in trend['capcut_steps'])}
-
-━━━ MIDJOURNEY PROMPT ━━━
-{trend['mj_prompt']}
-"""
+        full_recipe = (
+            f"TREND: {trend['title']}\n"
+            f"URL: {trend['url']}\n"
+            f"Niche: {trend['niche']} | Velocity: {trend['velocity_score']}/100\n\n"
+            f"━━━ HOOK TEXT (0:00–0:02) ━━━\n{trend['hooks'][0]}\n\n"
+            f"━━━ SOUND ━━━\n{s['name']} — {s['artist']}\nBPM: {s['bpm']} | Vibe: {s['vibe']}\nFind it: {s['link']}\n\n"
+            f"━━━ EDITING PACE ━━━\n{trend['pace_label']} (~{trend['cuts_per_min']} cuts/min)\nTransition: {trend['transition']}\n\n"
+            f"━━━ CAPCUT SCRIPT ━━━\n"
+            + "\n".join(f"{tc}  {instr}" for tc, instr in trend["capcut_steps"])
+            + f"\n\n━━━ MIDJOURNEY PROMPT ━━━\n{trend['mj_prompt']}\n"
+        )
         st.code(full_recipe, language=None)
 
-    st.markdown("---")
+    st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
 
 # ── Footer ────────────────────────────────────────────────────────────────────
-st.markdown("""
-<div style="text-align:center;color:#374151;font-size:.8rem;margin-top:40px;padding:20px;">
-  TrendRadar v0.6 · Global · Live YouTube Data API · Built with Streamlit
-</div>
-""", unsafe_allow_html=True)
-
+st.markdown(
+    '<div style="text-align:center;color:#374151;font-size:.78rem;margin-top:40px;padding:24px;">'
+    'TrendRadar v0.7 · Official YouTube Trending · Built with Streamlit'
+    '</div>',
+    unsafe_allow_html=True,
+)

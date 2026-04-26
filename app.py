@@ -27,6 +27,21 @@ COUNTRIES: dict[str, dict] = {
 BANNED_COUNTRIES: frozenset[str] = frozenset({"IN", "PK", "BD", "ID", "VN", "TH"})
 EN_MARKET_CODES:  frozenset[str] = frozenset({"US", "GB", "CA", "AU"})
 
+# Localized search queries — boosts local-language results at the API level
+LOCAL_QUERIES: dict[str, dict] = {
+    "US": {"q": "#shorts",                          "lang": "en"},
+    "GB": {"q": "#shorts uk",                       "lang": "en"},
+    "CA": {"q": "#shorts",                          "lang": "en"},
+    "AU": {"q": "#shorts",                          "lang": "en"},
+    "BR": {"q": "#shorts brasil OR dança OR trend", "lang": "pt"},
+    "DE": {"q": "#shorts deutsch OR trend",         "lang": "de"},
+    "ES": {"q": "#shorts tendencia OR viral",       "lang": "es"},
+    "FR": {"q": "#shorts tendance OR viral",        "lang": "fr"},
+    "IN": {"q": "#shorts india OR trending",        "lang": "hi"},
+    "JP": {"q": "#shorts トレンド",                  "lang": "ja"},
+}
+_LOCAL_QUERY_DEFAULT = {"q": "#shorts", "lang": "en"}
+
 _LATIN_WORD_RE  = re.compile(r'[a-zA-Z]{3,}')
 _HAS_LATIN_RE   = re.compile(r'[a-zA-Z]')
 _CLEAN_TITLE_RE = re.compile(r'[#\[\]@|]')
@@ -526,19 +541,20 @@ def fetch_trending_shorts(region_code: str, country_name: str) -> list[dict]:
     raw_ids:  list[str] = []
     page_token: str | None = None
 
+    local = LOCAL_QUERIES.get(country_cfg["code"], _LOCAL_QUERY_DEFAULT)
+
     for _ in range(5):          # hard cap: 5 pages = up to 250 raw candidates
         kwargs: dict = dict(
             part="snippet",
-            q="shorts",
+            q=local["q"],
             type="video",
             videoDuration="short",
             regionCode=region_code,
             order="viewCount",
             maxResults=50,
             publishedAfter=published_after,
+            relevanceLanguage=local["lang"],
         )
-        if country_cfg["rl"]:
-            kwargs["relevanceLanguage"] = country_cfg["rl"]
         if page_token:
             kwargs["pageToken"] = page_token
 
@@ -613,8 +629,9 @@ def fetch_trending_shorts(region_code: str, country_name: str) -> list[dict]:
         comments = int(stats.get("commentCount", 0))
         eng_rate = round((likes + comments) / max(views, 1) * 100, 2)
 
-        # Anti-bot: drop inflated-view videos with near-zero organic engagement
-        if views > 10_000 and eng_rate < 2.0:
+        # Anti-bot: EN markets use 2.0% threshold; other markets 1.0% (lower organic baseline)
+        bot_threshold = 2.0 if country_cfg["code"] in EN_MARKET_CODES else 1.0
+        if views > 10_000 and eng_rate < bot_threshold:
             continue
 
         suspect_engagement = views > 1_000 and eng_rate < 3.5

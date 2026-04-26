@@ -507,8 +507,8 @@ def tag_content_format(title: str, desc: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  FETCH DATA  — search.list targeted at fresh Shorts (last 48 h)
-#  3 pages × 100 quota = 300 units · videos.list ~3 units · total ~306/refresh
+#  FETCH DATA  — search.list targeted at fresh Shorts (last 7 days)
+#  5 pages × 100 quota = 500 units · videos.list ~5 units · total ~510/refresh
 # ══════════════════════════════════════════════════════════════════════════════
 
 @st.cache_data(ttl=7200, show_spinner=False)
@@ -516,17 +516,17 @@ def fetch_trending_shorts(region_code: str, country_name: str) -> list[dict]:
     yt = get_youtube()
     country_cfg = COUNTRIES[country_name]
 
-    # ── Step 1: search.list — hot Shorts published in the last 48 h ──────────
-    # 100 quota units/call × 3 pages = 300 units per refresh
+    # ── Step 1: search.list — hot Shorts published in the last 7 days ───────
+    # 100 quota units/call × 5 pages = 500 units per refresh
     published_after = (
-        datetime.now(timezone.utc).replace(microsecond=0) - timedelta(hours=48)
+        datetime.now(timezone.utc).replace(microsecond=0) - timedelta(days=7)
     ).isoformat()
 
     seen_ids: set[str] = set()
     raw_ids:  list[str] = []
     page_token: str | None = None
 
-    for _ in range(3):          # hard cap: 3 pages = up to 150 raw candidates
+    for _ in range(5):          # hard cap: 5 pages = up to 250 raw candidates
         kwargs: dict = dict(
             part="snippet",
             q="shorts",
@@ -650,6 +650,11 @@ def fetch_trending_shorts(region_code: str, country_name: str) -> list[dict]:
             "thumb":            snippet.get("thumbnails", {}).get("high", {}).get("url", ""),
             "url":              f"https://youtube.com/shorts/{vid_id}",
         })
+
+    # Top-50 cap: if more than 50 survived filters, keep the most-viewed ones
+    if len(results) > 50:
+        results.sort(key=lambda r: r["views"], reverse=True)
+        results = results[:50]
 
     if results:
         max_vel = max(r["velocity"] for r in results)

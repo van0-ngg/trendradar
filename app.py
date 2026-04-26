@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import html
 import isodate
 import re
@@ -507,39 +507,71 @@ def tag_content_format(title: str, desc: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  FETCH DATA  — uses videos.list(chart="mostPopular") = 1 quota unit/page
-#  4 pages × 50 = 200 candidates · ~8 total quota units per refresh
+#  FETCH DATA  — search.list targeted at fresh Shorts (last 48 h)
+#  3 pages × 100 quota = 300 units · videos.list ~3 units · total ~306/refresh
 # ══════════════════════════════════════════════════════════════════════════════
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def fetch_trending_shorts(target_count: int, region_code: str, country_name: str) -> list[dict]:
+@st.cache_data(ttl=7200, show_spinner=False)
+def fetch_trending_shorts(region_code: str, country_name: str) -> list[dict]:
     yt = get_youtube()
     country_cfg = COUNTRIES[country_name]
 
-    # ── Step 1: pull mostPopular chart (1 quota unit per page) ───────────────
-    pages = max(1, target_count // 50)
-    all_items: list[dict] = []
+    # ── Step 1: search.list — hot Shorts published in the last 48 h ──────────
+    # 100 quota units/call × 3 pages = 300 units per refresh
+    published_after = (
+        datetime.now(timezone.utc).replace(microsecond=0) - timedelta(hours=48)
+    ).isoformat()
+
+    seen_ids: set[str] = set()
+    raw_ids:  list[str] = []
     page_token: str | None = None
 
-    for _ in range(pages):
+    for _ in range(3):          # hard cap: 3 pages = up to 150 raw candidates
         kwargs: dict = dict(
-            part="snippet,statistics,contentDetails",
-            chart="mostPopular",
+            part="snippet",
+            q="shorts",
+            type="video",
+            videoDuration="short",
             regionCode=region_code,
+            order="viewCount",
             maxResults=50,
+            publishedAfter=published_after,
         )
+        if country_cfg["rl"]:
+            kwargs["relevanceLanguage"] = country_cfg["rl"]
         if page_token:
             kwargs["pageToken"] = page_token
-        resp = yt.videos().list(**kwargs).execute()
-        all_items.extend(resp.get("items", []))
+
+        resp = yt.search().list(**kwargs).execute()
+
+        for item in resp.get("items", []):
+            if item["id"].get("kind") == "youtube#video":
+                vid = item["id"]["videoId"]
+                if vid not in seen_ids:
+                    seen_ids.add(vid)
+                    raw_ids.append(vid)
+
         page_token = resp.get("nextPageToken")
         if not page_token:
             break
 
+    if not raw_ids:
+        return []
+
+    # ── Step 2: fetch full details in batches of 50 ───────────────────────────
+    all_items: list[dict] = []
+    for i in range(0, len(raw_ids), 50):
+        batch = raw_ids[i : i + 50]
+        stats_resp = yt.videos().list(
+            part="snippet,statistics,contentDetails",
+            id=",".join(batch),
+        ).execute()
+        all_items.extend(stats_resp.get("items", []))
+
     if not all_items:
         return []
 
-    # ── Step 2: channel → country lookup for EN markets (50 IDs/request) ────
+    # ── Step 3: channel → country lookup for EN markets (50 IDs/request) ────
     channel_countries: dict[str, str | None] = {}
     apply_channel_filter = country_cfg["code"] in EN_MARKET_CODES
     if apply_channel_filter:
@@ -554,7 +586,7 @@ def fetch_trending_shorts(target_count: int, region_code: str, country_name: str
             for ch in ch_resp.get("items", []):
                 channel_countries[ch["id"]] = ch["snippet"].get("country")
 
-    # ── Step 3: filter locally → only Shorts pass ────────────────────────────
+    # ── Step 4: filter, score, build result list ──────────────────────────────
     results: list[dict] = []
     for item in all_items:
         if not is_short(item):
@@ -743,8 +775,8 @@ st.markdown(
     f'<div class="hero-meta">'
     f'<span>📡 Live data</span>'
     f'<span>🕒 Refreshed at {now_str}</span>'
-    f'<span>💡 ~8 API quota units/hour</span>'
-    f'<span>🔒 1-hour cache</span>'
+    f'<span>💡 ~306 quota units/refresh</span>'
+    f'<span>🔒 2-hour cache</span>'
     f'</div></div>',
     unsafe_allow_html=True,
 )
@@ -756,7 +788,7 @@ st.markdown(
 
 with st.spinner(f"Loading official trending chart for {country_name}…"):
     try:
-        all_trends = fetch_trending_shorts(200, selected_country["code"], country_name)
+        all_trends = fetch_trending_shorts(selected_country["code"], country_name)
     except HttpError as e:
         st.error(f"YouTube API error: {e}")
         st.stop()

@@ -1191,7 +1191,7 @@ st.markdown(
     '</div>',
     unsafe_allow_html=True,
 )
-    LOCAL_QUERIES = {
+LOCAL_QUERIES = {
     "BR": {"q": "#shorts brasil OR dança OR trend", "lang": "pt"},
     "DE": {"q": "#shorts deutsch OR trend", "lang": "de"},
     "ES": {"q": "#shorts tendencia OR viral", "lang": "es"},

@@ -43,21 +43,21 @@ LOCAL_QUERIES: dict[str, dict] = {
 }
 _LOCAL_QUERY_DEFAULT = {"q": "#shorts", "lang": "en"}
 
-# Localized keyword queries for Long Videos — targets authored content, excludes music/trailers
+# Exclusion-based queries for Long Videos — minus-words filter out music, trailers, news, shorts
 LOCAL_QUERIES_LONG: dict[str, dict] = {
-    "US": {"q": "podcast OR vlog OR challenge OR review OR documentary"},
-    "GB": {"q": "podcast OR vlog OR challenge OR review OR documentary"},
-    "CA": {"q": "podcast OR vlog OR challenge OR review OR documentary"},
-    "AU": {"q": "podcast OR vlog OR challenge OR review OR documentary"},
-    "BR": {"q": "podcast OR vlog OR desafio OR resenha OR documentário"},
-    "DE": {"q": "podcast OR vlog OR challenge OR review OR dokumentation"},
-    "ES": {"q": "podcast OR vlog OR desafío OR review OR documental"},
-    "FR": {"q": "podcast OR vlog OR défi OR review OR documentaire"},
-    "IN": {"q": "podcast OR vlog OR challenge OR review OR documentary"},
-    "JP": {"q": "ポッドキャスト OR vlog OR チャレンジ OR レビュー OR ドキュメンタリー"},
-    "RU": {"q": "подкаст OR влог OR обзор OR шоу OR интервью"},
+    "US": {"q": "-official -music -trailer -vevo -teaser -news -shorts",                          "lang": "en"},
+    "GB": {"q": "-official -music -trailer -vevo -teaser -news -shorts",                          "lang": "en"},
+    "CA": {"q": "-official -music -trailer -vevo -teaser -news -shorts",                          "lang": "en"},
+    "AU": {"q": "-official -music -trailer -vevo -teaser -news -shorts",                          "lang": "en"},
+    "BR": {"q": "-oficial -clipe -música -trailer -vevo -notícias -shorts",                       "lang": "pt"},
+    "DE": {"q": "-offiziell -musik -trailer -teaser -nachrichten -shorts",                        "lang": "de"},
+    "ES": {"q": "-oficial -música -video -trailer -noticias -shorts",                             "lang": "es"},
+    "FR": {"q": "-officiel -musique -bande-annonce -trailer -actualités -shorts",                 "lang": "fr"},
+    "IN": {"q": "-official -music -trailer -vevo -teaser -news -shorts -song -album",             "lang": "hi"},
+    "JP": {"q": "-公式 -音楽 -トレーラー -テレビ -ニュース -shorts",                                   "lang": "ja"},
+    "RU": {"q": "-официальный -клип -музыка -премьера -трейлер -новости -shorts",                 "lang": "ru"},
 }
-_LOCAL_QUERY_LONG_DEFAULT = {"q": "podcast OR vlog OR challenge OR review"}
+_LOCAL_QUERY_LONG_DEFAULT = {"q": "-official -music -trailer -vevo -teaser -news -shorts", "lang": "en"}
 
 # Per-market anti-bot engagement threshold (EN strict, CIS moderate, others lenient)
 _BOT_THRESHOLDS: dict[str, float] = {

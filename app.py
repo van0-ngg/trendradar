@@ -535,6 +535,12 @@ def fetch_trending_videos(region_code: str, country_name: str, key_index: int = 
     # ── Split by format, score, build result list (no hard server-side filters) ─
     results: list[dict] = []
     for item in all_items:
+        vid_id       = item["id"]
+        duration_str = item.get("contentDetails", {}).get("duration", "MISSING")
+        duration_sec = _duration_seconds(duration_str)
+        views        = int(item.get("statistics", {}).get("viewCount", 0))
+        print(f"DEBUG VIDEO: ID={vid_id}, Raw_Duration={duration_str}, Sec={duration_sec}, Views={views}")
+
         if fmt == "shorts":
             if not is_short(item):
                 continue
@@ -589,7 +595,7 @@ def fetch_trending_videos(region_code: str, country_name: str, key_index: int = 
             "url":                video_url,
         })
 
-    print(f"[TrendRadar] fmt={fmt} region={region_code} | Total fetched: {len(all_items)}. After duration filter: {len(results)}")
+    print(f"[TrendRadar] fmt={fmt} region={region_code} | Total fetched: {len(all_items)}, After filter: {len(results)}")
 
     if results:
         max_vel = max(r["velocity"] for r in results)

@@ -44,11 +44,34 @@ LOCAL_QUERIES: dict[str, dict] = {
 }
 _LOCAL_QUERY_DEFAULT = {"q": "#shorts", "lang": "en"}
 
+# Localized queries for Long Videos — no #shorts tag, keyword-based
+LOCAL_QUERIES_LONG: dict[str, dict] = {
+    "US": {"q": "trending viral",                        "lang": "en"},
+    "GB": {"q": "trending viral uk",                     "lang": "en"},
+    "CA": {"q": "trending viral",                        "lang": "en"},
+    "AU": {"q": "trending viral",                        "lang": "en"},
+    "BR": {"q": "brasil viral tendência",                "lang": "pt"},
+    "DE": {"q": "viral deutschland trend",               "lang": "de"},
+    "ES": {"q": "viral tendencia españa",                "lang": "es"},
+    "FR": {"q": "viral tendance france",                 "lang": "fr"},
+    "IN": {"q": "india trending viral",                  "lang": "hi"},
+    "JP": {"q": "トレンド 人気 動画",                      "lang": "ja"},
+    "RU": {"q": "тренд топ вирусное видео",              "lang": "ru"},
+}
+_LOCAL_QUERY_LONG_DEFAULT = {"q": "trending viral", "lang": "en"}
+
 # Per-market anti-bot engagement threshold (EN strict, CIS moderate, others lenient)
 _BOT_THRESHOLDS: dict[str, float] = {
     "US": 2.0, "GB": 2.0, "CA": 2.0, "AU": 2.0,  # English-speaking — strict
     "RU": 1.5,                                      # CIS — moderate
 }
+
+# Long-video thresholds are lower — viewers watch but like less often
+_BOT_THRESHOLDS_LONG: dict[str, float] = {
+    "US": 0.8, "GB": 0.8, "CA": 0.8, "AU": 0.8,
+    "RU": 0.6,
+}
+_BOT_THRESHOLD_LONG_DEFAULT = 0.5
 
 _LATIN_WORD_RE  = re.compile(r'[a-zA-Z]{3,}')
 _HAS_LATIN_RE   = re.compile(r'[a-zA-Z]')
@@ -328,8 +351,18 @@ if st.session_state["role"] is None:
 #  YOUTUBE API HELPERS
 # ══════════════════════════════════════════════════════════════════════════════
 
-def get_youtube():
-    api_key = st.secrets.get("YOUTUBE_API_KEY", "")
+def _get_api_keys() -> list[str]:
+    # Supports YOUTUBE_API_KEYS = "key1,key2,key3"  OR legacy YOUTUBE_API_KEY = "key1"
+    raw = st.secrets.get("YOUTUBE_API_KEYS") or st.secrets.get("YOUTUBE_API_KEY", "")
+    if isinstance(raw, (list, tuple)):
+        return [str(k).strip() for k in raw if str(k).strip()]
+    return [k.strip() for k in str(raw).split(",") if k.strip()]
+
+def get_youtube(key_index: int = 0):
+    keys = _get_api_keys()
+    if not keys:
+        raise RuntimeError("No YouTube API key configured in secrets.")
+    api_key = keys[min(key_index, len(keys) - 1)]
     return build("youtube", "v3", developerKey=api_key, cache_discovery=False)
 
 def is_short(item: dict) -> bool:
@@ -342,6 +375,15 @@ def is_short(item: dict) -> bool:
     title = item["snippet"].get("title", "").lower()
     tags  = " ".join(item["snippet"].get("tags", [])).lower()
     return duration_sec <= 60 or "#shorts" in title or "#short" in title or "#shorts" in tags
+
+def is_long_video(item: dict) -> bool:
+    """True if video is strictly > 5 minutes (300 s)."""
+    raw = item["contentDetails"].get("duration", "PT0S")
+    try:
+        duration_sec = int(isodate.parse_duration(raw).total_seconds())
+    except Exception:
+        duration_sec = 0
+    return duration_sec > 300
 
 def is_target_language(title: str, desc: str, snippet: dict, country_cfg: dict) -> bool:
     target_langs = country_cfg["langs"]
@@ -558,17 +600,17 @@ def tag_content_format(title: str, desc: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  FETCH DATA  — search.list targeted at fresh Shorts (last 7 days)
-#  5 pages × 100 quota = 500 units · videos.list ~5 units · total ~510/refresh
+#  FETCH DATA  — search.list · fmt="shorts" or fmt="long"
+#  Shorts:  videoDuration="short" · 5 pages · ~510 quota units/refresh
+#  Long:    no duration filter · 5 pages · filter locally > 300 s
 # ══════════════════════════════════════════════════════════════════════════════
 
 @st.cache_data(ttl=7200, show_spinner=False)
-def fetch_trending_shorts(region_code: str, country_name: str) -> list[dict]:
-    yt = get_youtube()
+def fetch_trending_videos(region_code: str, country_name: str, key_index: int = 0, fmt: str = "shorts") -> list[dict]:
+    yt = get_youtube(key_index)
     country_cfg = COUNTRIES[country_name]
 
-    # ── Step 1: search.list — hot Shorts published in the last 7 days ───────
-    # 100 quota units/call × 5 pages = 500 units per refresh
+    # ── Step 1: search.list — last 7 days ────────────────────────────────────
     published_after = (
         datetime.now(timezone.utc).replace(microsecond=0) - timedelta(days=7)
     ).isoformat()
@@ -577,20 +619,24 @@ def fetch_trending_shorts(region_code: str, country_name: str) -> list[dict]:
     raw_ids:  list[str] = []
     page_token: str | None = None
 
-    local = LOCAL_QUERIES.get(country_cfg["code"], _LOCAL_QUERY_DEFAULT)
+    if fmt == "shorts":
+        local = LOCAL_QUERIES.get(country_cfg["code"], _LOCAL_QUERY_DEFAULT)
+    else:
+        local = LOCAL_QUERIES_LONG.get(country_cfg["code"], _LOCAL_QUERY_LONG_DEFAULT)
 
     for _ in range(5):          # hard cap: 5 pages = up to 250 raw candidates
         kwargs: dict = dict(
             part="snippet",
             q=local["q"],
             type="video",
-            videoDuration="short",
             regionCode=region_code,
             order="viewCount",
             maxResults=50,
             publishedAfter=published_after,
             relevanceLanguage=local["lang"],
         )
+        if fmt == "shorts":
+            kwargs["videoDuration"] = "short"
         if page_token:
             kwargs["pageToken"] = page_token
 
@@ -641,8 +687,12 @@ def fetch_trending_shorts(region_code: str, country_name: str) -> list[dict]:
     # ── Step 4: filter, score, build result list ──────────────────────────────
     results: list[dict] = []
     for item in all_items:
-        if not is_short(item):
-            continue
+        if fmt == "shorts":
+            if not is_short(item):
+                continue
+        else:
+            if not is_long_video(item):
+                continue
 
         snippet = item["snippet"]
         title   = snippet.get("title", "Untitled")
@@ -665,12 +715,17 @@ def fetch_trending_shorts(region_code: str, country_name: str) -> list[dict]:
         comments = int(stats.get("commentCount", 0))
         eng_rate = round((likes + comments) / max(views, 1) * 100, 2)
 
-        # Anti-bot: threshold varies by market (EN 2.0%, RU 1.5%, others 1.0%)
-        bot_threshold = _BOT_THRESHOLDS.get(country_cfg["code"], 1.0)
+        if fmt == "shorts":
+            bot_threshold    = _BOT_THRESHOLDS.get(country_cfg["code"], 1.0)
+            suspect_threshold = 3.5
+        else:
+            bot_threshold    = _BOT_THRESHOLDS_LONG.get(country_cfg["code"], _BOT_THRESHOLD_LONG_DEFAULT)
+            suspect_threshold = 1.0
+
         if views > 10_000 and eng_rate < bot_threshold:
             continue
 
-        suspect_engagement = views > 1_000 and eng_rate < 3.5
+        suspect_engagement = views > 1_000 and eng_rate < suspect_threshold
 
         age_h          = hours_since(pub_at)
         vel            = velocity_score(views, age_h)
@@ -678,6 +733,11 @@ def fetch_trending_shorts(region_code: str, country_name: str) -> list[dict]:
         content_format = tag_content_format(title, desc)
         pace_lbl, cpm, transition = pace_for_niche(niche)
         age_str        = f"{age_h:.0f}h ago" if age_h < 48 else f"{age_h/24:.0f}d ago"
+
+        if fmt == "shorts":
+            video_url = f"https://youtube.com/shorts/{vid_id}"
+        else:
+            video_url = f"https://youtube.com/watch?v={vid_id}"
 
         results.append({
             "id":               vid_id,
@@ -701,7 +761,7 @@ def fetch_trending_shorts(region_code: str, country_name: str) -> list[dict]:
             "capcut_steps":     generate_capcut_steps(niche, title),
             "mj_prompt":        generate_mj_prompt(title, niche),
             "thumb":            snippet.get("thumbnails", {}).get("high", {}).get("url", ""),
-            "url":              f"https://youtube.com/shorts/{vid_id}",
+            "url":              video_url,
         })
 
     # Top-50 cap: if more than 50 survived filters, keep the most-viewed ones
@@ -716,6 +776,29 @@ def fetch_trending_shorts(region_code: str, country_name: str) -> list[dict]:
             r["hot_label"], r["badge"] = badge_for_velocity(r["velocity"], max_vel)
 
     return results
+
+
+# ── Key-rotation wrapper (not cached — manages session state) ────────────────
+def load_trending_videos(region_code: str, country_name: str, fmt: str = "shorts") -> list[dict] | None:
+    if "current_key_index" not in st.session_state:
+        st.session_state.current_key_index = 0
+
+    keys = _get_api_keys()
+    if not keys:
+        st.error("No YouTube API keys configured. Add YOUTUBE_API_KEYS to Streamlit secrets.")
+        return None
+
+    while st.session_state.current_key_index < len(keys):
+        try:
+            return fetch_trending_videos(region_code, country_name, st.session_state.current_key_index, fmt)
+        except HttpError as e:
+            if e.resp.status == 403 and "quotaExceeded" in str(e):
+                st.session_state.current_key_index += 1
+                print(f"[TrendRadar] Key exhausted. Switching to key index {st.session_state.current_key_index}")
+            else:
+                raise
+
+    return None  # all keys exhausted
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -742,6 +825,13 @@ with st.sidebar:
 
     st.markdown("### ⚙️ Controls")
 
+    content_fmt = st.radio(
+        "📺 Content Format",
+        ["Shorts (≤ 60s)", "Long Videos (> 5m)"],
+        horizontal=True,
+    )
+    fmt_key = "shorts" if content_fmt == "Shorts (≤ 60s)" else "long"
+
     country_name = st.selectbox(
         "🌍 Market",
         list(COUNTRIES.keys()),
@@ -760,6 +850,7 @@ with st.sidebar:
     with col_refresh:
         if st.button("🔄 Refresh", use_container_width=True, type="primary"):
             st.cache_data.clear()
+            st.session_state.current_key_index = 0
             st.rerun()
     with col_logout:
         if st.button("🚪 Logout", use_container_width=True):
@@ -844,12 +935,20 @@ st.markdown(
 #  LOAD DATA
 # ══════════════════════════════════════════════════════════════════════════════
 
-with st.spinner(f"Loading official trending chart for {country_name}…"):
+with st.spinner(f"Loading {content_fmt} for {country_name}…"):
     try:
-        all_trends = fetch_trending_shorts(selected_country["code"], country_name)
+        all_trends = load_trending_videos(selected_country["code"], country_name, fmt_key)
     except HttpError as e:
         st.error(f"YouTube API error: {e}")
         st.stop()
+
+if all_trends is None:
+    st.warning(
+        "We are experiencing unusually high traffic. "
+        "Fetching the latest cached trends. "
+        "Please try refreshing in a few hours."
+    )
+    st.stop()
 
 if not all_trends:
     st.warning("No Shorts found in the current trending chart. Try another market or refresh.")

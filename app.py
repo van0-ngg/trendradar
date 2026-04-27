@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import html
 import re
 import json
@@ -24,66 +24,10 @@ COUNTRIES: dict[str, dict] = {
     "🇷🇺 Russia":         {"code": "RU", "langs": frozenset(["ru"]),                               "rl": "ru",  "script": "cyrillic"},
 }
 
-BANNED_COUNTRIES: frozenset[str] = frozenset({"IN", "PK", "BD", "ID", "VN", "TH"})
-EN_MARKET_CODES:  frozenset[str] = frozenset({"US", "GB", "CA", "AU"})
 
-# Localized search queries — boosts local-language results at the API level
-LOCAL_QUERIES: dict[str, dict] = {
-    "US": {"q": "#shorts",                          "lang": "en"},
-    "GB": {"q": "#shorts uk",                       "lang": "en"},
-    "CA": {"q": "#shorts",                          "lang": "en"},
-    "AU": {"q": "#shorts",                          "lang": "en"},
-    "BR": {"q": "#shorts brasil OR dança OR trend", "lang": "pt"},
-    "DE": {"q": "#shorts deutsch OR trend",         "lang": "de"},
-    "ES": {"q": "#shorts tendencia OR viral",       "lang": "es"},
-    "FR": {"q": "#shorts tendance OR viral",        "lang": "fr"},
-    "IN": {"q": "#shorts india OR trending",                              "lang": "hi"},
-    "JP": {"q": "#shorts トレンド",                                        "lang": "ja"},
-    "RU": {"q": "#shorts тренд | топ | шортс | тикток | рекомендации",   "lang": "ru"},
-}
-_LOCAL_QUERY_DEFAULT = {"q": "#shorts", "lang": "en"}
-
-# Hybrid queries for Long Videos — broad positive OR terms + minus-words to strip music/trailers
-LOCAL_QUERIES_LONG: dict[str, dict] = {
-    "US": {"q": "(vlog OR podcast OR challenge OR documentary OR review) -official -music -vevo -trailer",            "lang": "en"},
-    "GB": {"q": "(vlog OR podcast OR challenge OR documentary OR review) -official -music -vevo -trailer",            "lang": "en"},
-    "CA": {"q": "(vlog OR podcast OR challenge OR documentary OR review) -official -music -vevo -trailer",            "lang": "en"},
-    "AU": {"q": "(vlog OR podcast OR challenge OR documentary OR review) -official -music -vevo -trailer",            "lang": "en"},
-    "BR": {"q": "(vlog OR podcast OR desafio OR rotina OR tour) -oficial -clipe -música -vevo -trailer",              "lang": "pt"},
-    "DE": {"q": "(vlog OR podcast OR challenge OR doku OR review) -offiziell -musik -vevo -trailer",                  "lang": "de"},
-    "ES": {"q": "(vlog OR podcast OR reto OR documental OR rutina) -oficial -música -vevo -trailer",                  "lang": "es"},
-    "FR": {"q": "(vlog OR podcast OR défi OR documentaire OR routine) -officiel -musique -vevo -trailer",             "lang": "fr"},
-    "IN": {"q": "(vlog OR podcast OR challenge OR documentary OR review) -official -music -vevo -trailer -song",      "lang": "hi"},
-    "JP": {"q": "(vlog OR ポッドキャスト OR チャレンジ OR ドキュメンタリー OR レビュー) -公式 -音楽 -vevo -トレーラー",      "lang": "ja"},
-    "RU": {"q": "(влог OR подкаст OR челлендж OR обзор OR интервью) -официальный -клип -музыка -премьера -трейлер",  "lang": "ru"},
-}
-_LOCAL_QUERY_LONG_DEFAULT = {"q": "(vlog OR podcast OR challenge OR documentary OR review) -official -music -vevo -trailer", "lang": "en"}
-
-# Per-market anti-bot engagement threshold (EN strict, CIS moderate, others lenient)
-_BOT_THRESHOLDS: dict[str, float] = {
-    "US": 2.0, "GB": 2.0, "CA": 2.0, "AU": 2.0,  # English-speaking — strict
-    "RU": 1.5,                                      # CIS — moderate
-}
-
-# Long-video thresholds are very low — big channels (MrBeast-scale) have naturally low engagement ratios
-_BOT_THRESHOLDS_LONG: dict[str, float] = {
-    "US": 0.2, "GB": 0.2, "CA": 0.2, "AU": 0.2,
-    "RU": 0.2,
-}
-_BOT_THRESHOLD_LONG_DEFAULT = 0.2
-
-_LATIN_WORD_RE  = re.compile(r'[a-zA-Z]{3,}')
 _HAS_LATIN_RE   = re.compile(r'[a-zA-Z]')
 _CLEAN_TITLE_RE = re.compile(r'[#\[\]@|]')
 _PT_RE          = re.compile(r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?')
-
-_DEVANAGARI_RE    = re.compile(r'[ऀ-ॿঀ-৿઀-૿஀-௿ఀ-೿ഀ-ൿ]')
-_CJK_KANA_RE      = re.compile(r'[぀-ゟ゠-ヿ一-鿿㐀-䶿]')
-_CYRILLIC_RE      = re.compile(r'[Ѐ-ӿԀ-ԯ]')
-_HINGLISH_RE      = re.compile(
-    r'\b(?:ke|ko|ki|hai|mein|ne|aur|yeh|woh|bhai|desi|kya|hua|banayi)\b',
-    re.IGNORECASE,
-)
 
 _STREAM_RE  = re.compile(
     r'\b(?:twitch|kick|stream(?:er|ing)?|gameplay|gaming|gta|minecraft|fortnite|'
@@ -94,20 +38,6 @@ _PODCAST_RE = re.compile(
     r'\b(?:podcast|interview|ep\.?\s*\d+|episode|hosted\s+by|подкаст|интервью|'
     r'talk\s+show|mic\s+check|sit\s*down\s*with)\b',
     re.IGNORECASE,
-)
-
-_HOSTILE_RE = re.compile(
-    r'[ऀ-ॿঀ-৿਀-૿଀-௿'
-    r'ఀ-೿ഀ-ൿ'
-    r'؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿'
-    r'Ѐ-ӿԀ-ԯ'
-    r'一-鿿㐀-䶿぀-ゟ゠-ヿ'
-    r'가-힯฀-๿א-ת]'
-)
-_INDIA_HOSTILE_RE = re.compile(
-    r'[一-鿿぀-ヿ가-힯'
-    r'Ѐ-ӿԀ-ԯ'
-    r'؀-ۿݐ-ݿࢠ-ࣿ]'
 )
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -383,39 +313,6 @@ def is_long_video(item: dict) -> bool:
     """True if video is strictly > 5 minutes (300 s)."""
     return _duration_seconds(item["contentDetails"].get("duration", "PT0S")) > 300
 
-def is_target_language(title: str, desc: str, snippet: dict, country_cfg: dict) -> bool:
-    target_langs = country_cfg["langs"]
-    script_mode  = country_cfg["script"]
-    text = title + " " + desc[:100]
-
-    if script_mode == "latin":
-        if _CYRILLIC_RE.search(title) or _DEVANAGARI_RE.search(title):
-            return False
-        if _HINGLISH_RE.search(title):
-            return False
-
-    for field in ("defaultLanguage", "defaultAudioLanguage"):
-        lang = (snippet.get(field) or "").split("-")[0].lower()
-        if lang:
-            return lang in target_langs
-
-    if script_mode == "cjk":
-        return bool(_CJK_KANA_RE.search(title))
-
-    if script_mode == "india":
-        if _INDIA_HOSTILE_RE.search(text):
-            return False
-        return bool(_DEVANAGARI_RE.search(title)) or bool(_LATIN_WORD_RE.search(title))
-
-    if script_mode == "cyrillic":
-        if _CJK_KANA_RE.search(title) or _DEVANAGARI_RE.search(title):
-            return False
-        return bool(_CYRILLIC_RE.search(title))
-
-    if _HOSTILE_RE.search(text):
-        return False
-    return bool(_LATIN_WORD_RE.search(title))
-
 def hours_since(published_at: str) -> float:
     pub = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
     return max((datetime.now(timezone.utc) - pub).total_seconds() / 3600, 0.1)
@@ -598,104 +495,39 @@ def tag_content_format(title: str, desc: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  FETCH DATA  — search.list · fmt="shorts" or fmt="long"
-#  Shorts:  videoDuration="short" · 5 pages · ~510 quota units/refresh
-#  Long:    no duration filter · 5 pages · filter locally > 300 s
+#  FETCH DATA — videos.list(chart="mostPopular") · up to 4 pages · ~4 quota units
+#  Format split done locally: Shorts ≤ 60 s, Long > 5 m. No server-side filters.
 # ══════════════════════════════════════════════════════════════════════════════
 
 @st.cache_data(ttl=7200, show_spinner=False)
 def fetch_trending_videos(region_code: str, country_name: str, key_index: int = 0, fmt: str = "shorts") -> list[dict]:
     yt = get_youtube(key_index)
-    country_cfg = COUNTRIES[country_name]
 
-    # ── Step 1: search.list ──────────────────────────────────────────────────
-    # Shorts: last 7 days — fresh viral content
-    # Long:   last 30 days — big creators post less often, videos stay relevant longer
-    days = 7 if fmt == "shorts" else 30
-    published_after = (
-        datetime.now(timezone.utc).replace(microsecond=0) - timedelta(days=days)
-    ).isoformat()
-
-    seen_ids: set[str] = set()
-    raw_ids:  list[str] = []
+    # ── Pull mostPopular chart (4 pages × 50 = up to 200 videos) ─────────────
+    all_items: list[dict] = []
     page_token: str | None = None
 
-    for _ in range(5):          # hard cap: 5 pages = up to 250 raw candidates
-        if fmt == "shorts":
-            local = LOCAL_QUERIES.get(country_cfg["code"], _LOCAL_QUERY_DEFAULT)
-            kwargs: dict = dict(
-                part="snippet",
-                q=local["q"],
-                type="video",
-                videoDuration="short",
-                regionCode=region_code,
-                order="viewCount",
-                maxResults=50,
-                publishedAfter=published_after,
-                relevanceLanguage=local["lang"],
-            )
-        else:
-            # Keyword query targets authored content (podcasts, vlogs, reviews, docs)
-            # No videoDuration — filter locally for > 300 s
-            # No relevanceLanguage — global creators (MrBeast etc.) must not be excluded
-            local_long = LOCAL_QUERIES_LONG.get(country_cfg["code"], _LOCAL_QUERY_LONG_DEFAULT)
-            kwargs = dict(
-                part="snippet",
-                q=local_long["q"],
-                type="video",
-                regionCode=region_code,
-                order="viewCount",
-                maxResults=50,
-                publishedAfter=published_after,
-            )
+    for _ in range(4):
+        kwargs: dict = dict(
+            part="snippet,statistics,contentDetails",
+            chart="mostPopular",
+            regionCode=region_code,
+            maxResults=50,
+        )
         if page_token:
             kwargs["pageToken"] = page_token
 
-        resp = yt.search().list(**kwargs).execute()
-
-        for item in resp.get("items", []):
-            if item["id"].get("kind") == "youtube#video":
-                vid = item["id"]["videoId"]
-                if vid not in seen_ids:
-                    seen_ids.add(vid)
-                    raw_ids.append(vid)
+        resp = yt.videos().list(**kwargs).execute()
+        all_items.extend(resp.get("items", []))
 
         page_token = resp.get("nextPageToken")
         if not page_token:
             break
 
-    if not raw_ids:
-        return []
-
-    # ── Step 2: fetch full details in batches of 50 ───────────────────────────
-    all_items: list[dict] = []
-    for i in range(0, len(raw_ids), 50):
-        batch = raw_ids[i : i + 50]
-        stats_resp = yt.videos().list(
-            part="snippet,statistics,contentDetails",
-            id=",".join(batch),
-        ).execute()
-        all_items.extend(stats_resp.get("items", []))
-
     if not all_items:
         return []
 
-    # ── Step 3: channel → country lookup for EN markets (50 IDs/request) ────
-    channel_countries: dict[str, str | None] = {}
-    apply_channel_filter = country_cfg["code"] in EN_MARKET_CODES
-    if apply_channel_filter:
-        channel_ids = list({item["snippet"]["channelId"] for item in all_items})
-        for i in range(0, len(channel_ids), 50):
-            batch = channel_ids[i : i + 50]
-            ch_resp = yt.channels().list(
-                part="snippet",
-                id=",".join(batch),
-                maxResults=50,
-            ).execute()
-            for ch in ch_resp.get("items", []):
-                channel_countries[ch["id"]] = ch["snippet"].get("country")
-
-    # ── Step 4: filter, score, build result list ──────────────────────────────
+    # ── Split by format, score, build result list (no hard server-side filters) ─
     results: list[dict] = []
     for item in all_items:
         if fmt == "shorts":
@@ -708,35 +540,16 @@ def fetch_trending_videos(region_code: str, country_name: str, key_index: int = 
         snippet = item["snippet"]
         title   = snippet.get("title", "Untitled")
         desc    = snippet.get("description", "")
+        stats   = item.get("statistics", {})
+        pub_at  = snippet.get("publishedAt", "")
+        vid_id  = item["id"]
 
-        if apply_channel_filter:
-            ch_country = channel_countries.get(snippet.get("channelId", ""))
-            if ch_country in BANNED_COUNTRIES:
-                continue
-
-        if not is_target_language(title, desc, snippet, country_cfg):
-            continue
-
-        stats  = item.get("statistics", {})
-        pub_at = snippet.get("publishedAt", "")
-        vid_id = item["id"]
-
-        views    = int(stats.get("viewCount", 0))
-        likes    = int(stats.get("likeCount", 0))
+        views    = int(stats.get("viewCount",  0))
+        likes    = int(stats.get("likeCount",  0))
         comments = int(stats.get("commentCount", 0))
         eng_rate = round((likes + comments) / max(views, 1) * 100, 2)
 
-        if fmt == "shorts":
-            bot_threshold    = _BOT_THRESHOLDS.get(country_cfg["code"], 1.0)
-            suspect_threshold = 3.5
-        else:
-            bot_threshold    = _BOT_THRESHOLDS_LONG.get(country_cfg["code"], _BOT_THRESHOLD_LONG_DEFAULT)
-            suspect_threshold = 1.0
-
-        if views > 10_000 and eng_rate < bot_threshold:
-            continue
-
-        suspect_engagement = views > 1_000 and eng_rate < suspect_threshold
+        suspect_engagement = views > 100_000 and eng_rate < 1.0
 
         age_h          = hours_since(pub_at)
         vel            = velocity_score(views, age_h)
@@ -744,41 +557,32 @@ def fetch_trending_videos(region_code: str, country_name: str, key_index: int = 
         content_format = tag_content_format(title, desc)
         pace_lbl, cpm, transition = pace_for_niche(niche)
         age_str        = f"{age_h:.0f}h ago" if age_h < 48 else f"{age_h/24:.0f}d ago"
-
-        if fmt == "shorts":
-            video_url = f"https://youtube.com/shorts/{vid_id}"
-        else:
-            video_url = f"https://youtube.com/watch?v={vid_id}"
+        video_url      = f"https://youtube.com/shorts/{vid_id}" if fmt == "shorts" else f"https://youtube.com/watch?v={vid_id}"
 
         results.append({
-            "id":               vid_id,
-            "title":            title,
-            "niche":            niche,
-            "content_format":   content_format,
-            "views":            views,
-            "likes":            likes,
-            "comments":         comments,
-            "age_hours":        round(age_h, 1),
-            "age_str":          age_str,
-            "velocity":         vel,
-            "velocity_score":   0.0,
-            "engagement":       eng_rate,
+            "id":                 vid_id,
+            "title":              title,
+            "niche":              niche,
+            "content_format":     content_format,
+            "views":              views,
+            "likes":              likes,
+            "comments":           comments,
+            "age_hours":          round(age_h, 1),
+            "age_str":            age_str,
+            "velocity":           vel,
+            "velocity_score":     0.0,
+            "engagement":         eng_rate,
             "suspect_engagement": suspect_engagement,
-            "sound":            sound_for_niche(niche),
-            "pace_label":       pace_lbl,
-            "cuts_per_min":     cpm,
-            "transition":       transition,
-            "hooks":            generate_hooks(title, niche),
-            "capcut_steps":     generate_capcut_steps(niche, title),
-            "mj_prompt":        generate_mj_prompt(title, niche),
-            "thumb":            snippet.get("thumbnails", {}).get("high", {}).get("url", ""),
-            "url":              video_url,
+            "sound":              sound_for_niche(niche),
+            "pace_label":         pace_lbl,
+            "cuts_per_min":       cpm,
+            "transition":         transition,
+            "hooks":              generate_hooks(title, niche),
+            "capcut_steps":       generate_capcut_steps(niche, title),
+            "mj_prompt":          generate_mj_prompt(title, niche),
+            "thumb":              snippet.get("thumbnails", {}).get("high", {}).get("url", ""),
+            "url":                video_url,
         })
-
-    # Top-50 cap: if more than 50 survived filters, keep the most-viewed ones
-    if len(results) > 50:
-        results.sort(key=lambda r: r["views"], reverse=True)
-        results = results[:50]
 
     if results:
         max_vel = max(r["velocity"] for r in results)
@@ -855,7 +659,9 @@ with st.sidebar:
         "📊 Sort by",
         ["🚀 Velocity Score", "👁️ Total Views", "❤️ Engagement Rate"],
     )
-    min_vel = st.slider("Min Velocity Score", 0, 100, 0, 5)
+    min_vel     = st.slider("Min Velocity Score", 0, 100, 0, 5)
+    min_views_k = st.slider("Min Views (×1K)", 0, 5_000, 0, 100)
+    min_eng     = st.slider("Min Engagement %", 0.0, 10.0, 0.0, 0.1, format="%.1f%%")
 
     col_refresh, col_logout = st.columns([3, 2])
     with col_refresh:
@@ -935,7 +741,7 @@ st.markdown(
     f'<div class="hero-meta">'
     f'<span>📡 Live data</span>'
     f'<span>🕒 Refreshed at {now_str}</span>'
-    f'<span>💡 ~306 quota units/refresh</span>'
+    f'<span>💡 ~4 quota units/refresh</span>'
     f'<span>🔒 2-hour cache</span>'
     f'</div></div>',
     unsafe_allow_html=True,
@@ -978,11 +784,14 @@ with st.sidebar:
         help="Original creator content, stream clips, or podcast snippets",
     )
 
+min_views = min_views_k * 1_000
 filtered = [
     t for t in all_trends
-    if t["niche"]          in selected_niches
+    if t["niche"]           in selected_niches
     and t["content_format"] in selected_formats
     and t["velocity_score"] >= min_vel
+    and t["views"]          >= min_views
+    and t["engagement"]     >= min_eng
 ]
 
 sort_map = {

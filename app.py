@@ -295,12 +295,17 @@ def get_youtube(key_index: int = 0):
     api_key = keys[min(key_index, len(keys) - 1)]
     return build("youtube", "v3", developerKey=api_key, cache_discovery=False)
 
-def _duration_seconds(raw: str) -> int:
-    """Parse ISO 8601 PT#H#M#S to total seconds. Regex-based — handles hours correctly."""
-    m = _PT_RE.match(raw or "PT0S")
-    if not m:
+def _duration_seconds(duration_str: str) -> int:
+    """Parse ISO 8601 PT#H#M#S to total seconds."""
+    if not duration_str:
         return 0
-    return int(m.group(1) or 0) * 3600 + int(m.group(2) or 0) * 60 + int(m.group(3) or 0)
+    match = _PT_RE.match(duration_str)
+    if not match:
+        return 0
+    hours   = int(match.group(1)) if match.group(1) else 0
+    minutes = int(match.group(2)) if match.group(2) else 0
+    seconds = int(match.group(3)) if match.group(3) else 0
+    return hours * 3600 + minutes * 60 + seconds
 
 def is_short(item: dict) -> bool:
     """True if video is ≤ 60 s OR explicitly tagged #shorts."""
@@ -310,8 +315,8 @@ def is_short(item: dict) -> bool:
     return _duration_seconds(raw) <= 60 or "#shorts" in title or "#short" in title or "#shorts" in tags
 
 def is_long_video(item: dict) -> bool:
-    """True if video is strictly > 5 minutes (300 s)."""
-    return _duration_seconds(item["contentDetails"].get("duration", "PT0S")) > 300
+    """True if video is strictly > 2 minutes (120 s)."""
+    return _duration_seconds(item["contentDetails"].get("duration", "PT0S")) > 120
 
 def hours_since(published_at: str) -> float:
     pub = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
@@ -583,6 +588,8 @@ def fetch_trending_videos(region_code: str, country_name: str, key_index: int = 
             "thumb":              snippet.get("thumbnails", {}).get("high", {}).get("url", ""),
             "url":                video_url,
         })
+
+    print(f"[TrendRadar] fmt={fmt} region={region_code} | Total fetched: {len(all_items)}. After duration filter: {len(results)}")
 
     if results:
         max_vel = max(r["velocity"] for r in results)

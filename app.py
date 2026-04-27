@@ -1191,13 +1191,14 @@ st.markdown(
     '</div>',
     unsafe_allow_html=True,
 )
+    LOCAL_QUERIES = {
     "BR": {"q": "#shorts brasil OR dança OR trend", "lang": "pt"},
-    "DE": {"q": "#shorts deutsch OR trend",         "lang": "de"},
-    "ES": {"q": "#shorts tendencia OR viral",       "lang": "es"},
-    "FR": {"q": "#shorts tendance OR viral",        "lang": "fr"},
-    "IN": {"q": "#shorts india OR trending",                              "lang": "hi"},
-    "JP": {"q": "#shorts トレンド",                                        "lang": "ja"},
-    "RU": {"q": "#shorts тренд | топ | шортс | тикток | рекомендации",   "lang": "ru"},
+    "DE": {"q": "#shorts deutsch OR trend", "lang": "de"},
+    "ES": {"q": "#shorts tendencia OR viral", "lang": "es"},
+    "FR": {"q": "#shorts tendance OR viral", "lang": "fr"},
+    "IN": {"q": "#shorts india OR trending", "lang": "hi"},
+    "JP": {"q": "#shorts トレンド", "lang": "ja"},
+    "RU": {"q": "#shorts тренд | топ | шортс | тикток | рекомендации", "lang": "ru"}
 }
 _LOCAL_QUERY_DEFAULT = {"q": "#shorts", "lang": "en"}
 

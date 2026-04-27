@@ -309,14 +309,14 @@ def _duration_seconds(duration_str: str) -> int:
 
 def is_short(item: dict) -> bool:
     """True if video is ≤ 60 s OR explicitly tagged #shorts."""
-    raw   = item["contentDetails"].get("duration", "PT0S")
-    title = item["snippet"].get("title", "").lower()
-    tags  = " ".join(item["snippet"].get("tags", [])).lower()
+    raw   = item.get("contentDetails", {}).get("duration", "PT0S")
+    title = item.get("snippet", {}).get("title", "").lower()
+    tags  = " ".join(item.get("snippet", {}).get("tags", [])).lower()
     return _duration_seconds(raw) <= 60 or "#shorts" in title or "#short" in title or "#shorts" in tags
 
 def is_long_video(item: dict) -> bool:
     """True if video is strictly > 2 minutes (120 s)."""
-    return _duration_seconds(item["contentDetails"].get("duration", "PT0S")) > 120
+    return _duration_seconds(item.get("contentDetails", {}).get("duration", "PT0S")) > 120
 
 def hours_since(published_at: str) -> float:
     pub = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
@@ -562,7 +562,7 @@ def fetch_trending_videos(region_code: str, country_name: str, key_index: int = 
 
         suspect_engagement = views > 100_000 and eng_rate < 1.0
 
-        age_h          = hours_since(pub_at)
+        age_h          = hours_since(pub_at) if pub_at else 0.1
         vel            = velocity_score(views, age_h)
         niche          = categorise(title, desc)
         content_format = tag_content_format(title, desc)
@@ -899,9 +899,10 @@ st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 # ══════════════════════════════════════════════════════════════════════════════
 
 for trend in filtered:
-    vel     = trend["velocity_score"]
+  try:
+    vel     = trend.get("velocity_score", 0.0)
     bar_w   = int(vel)
-    age_str = trend["age_str"]
+    age_str = trend.get("age_str", "?")
 
     col_img, col_main = st.columns([1, 5])
 
@@ -1021,6 +1022,9 @@ for trend in filtered:
         st.code(full_recipe, language=None)
 
     st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
+  except Exception as _card_err:
+    print(f"[TrendRadar] Card render error for '{trend.get('title','?')[:50]}': {_card_err!r}")
+    st.warning(f"Could not render card: {_card_err}")
 
 
 # ── Footer ────────────────────────────────────────────────────────────────────

@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import plotly.express as px
 from datetime import datetime, timezone, timedelta
@@ -351,6 +352,108 @@ st.markdown("""
     border: 1px solid rgba(99,102,241,.2); border-radius: 999px;
     padding: 4px 14px; font-size: .72rem; color: #a5b4fc;
   }
+
+  /* ══ KEYFRAMES ═══════════════════════════════════════════════════════════ */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(30px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  @keyframes pulse-ring {
+    0%   { box-shadow: 0 0 0 0 rgba(248,113,113,.3); }
+    70%  { box-shadow: 0 0 0 14px rgba(248,113,113,0); }
+    100% { box-shadow: 0 0 0 0 rgba(248,113,113,0); }
+  }
+  @keyframes orb-drift {
+    0%,100% { transform: translate(0,0) scale(1); }
+    33%     { transform: translate(44px,-34px) scale(1.05); }
+    66%     { transform: translate(-28px,22px) scale(0.96); }
+  }
+  @keyframes orb-drift-r {
+    0%,100% { transform: translate(0,0) scale(1); }
+    33%     { transform: translate(-36px,28px) scale(1.04); }
+    66%     { transform: translate(30px,-18px) scale(0.97); }
+  }
+  @keyframes fill-bar {
+    from { transform: scaleX(0); }
+    to   { transform: scaleX(1); }
+  }
+  @keyframes gradient-shift {
+    0%,100% { background-position: 0% 50%; }
+    50%     { background-position: 100% 50%; }
+  }
+  @keyframes badge-breathe {
+    0%,100% { opacity: 1; }
+    50%     { opacity: .65; }
+  }
+
+  /* ══ PAGE-LOAD ENTRANCES ═════════════════════════════════════════════════ */
+  .hero { animation: fadeUp .85s cubic-bezier(.16,1,.3,1) both; }
+
+  .metric-card { animation: fadeUp .7s cubic-bezier(.16,1,.3,1) both; }
+  .metric-card:nth-child(1) { animation-delay: .05s; }
+  .metric-card:nth-child(2) { animation-delay: .12s; }
+  .metric-card:nth-child(3) { animation-delay: .19s; }
+  .metric-card:nth-child(4) { animation-delay: .26s; }
+  .metric-card.fire {
+    animation: fadeUp .7s cubic-bezier(.16,1,.3,1) .05s both,
+               pulse-ring 2.8s ease-in-out 1.8s infinite;
+  }
+
+  /* ══ SCROLL REVEAL (class added by JS) ═══════════════════════════════════ */
+  .trend-card {
+    opacity: 0;
+    transform: translateY(24px);
+    transition: opacity .6s cubic-bezier(.16,1,.3,1),
+                transform .6s cubic-bezier(.16,1,.3,1);
+  }
+  .trend-card.is-visible { opacity: 1; transform: translateY(0); }
+
+  /* ══ VELOCITY BAR FILL ═══════════════════════════════════════════════════ */
+  .vel-bar-fill {
+    transform-origin: left center;
+    animation: fill-bar 1s cubic-bezier(.16,1,.3,1) .4s both;
+  }
+
+  /* ══ ANIMATED GRADIENT TEXT ══════════════════════════════════════════════ */
+  .gradient-text {
+    background: linear-gradient(120deg, #818cf8, #c084fc, #60a5fa, #818cf8);
+    background-size: 250% 250%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: gradient-shift 5s ease infinite;
+  }
+
+  /* ══ FIRE BADGE BREATH ═══════════════════════════════════════════════════ */
+  .badge-fire { animation: badge-breathe 2.2s ease-in-out infinite; }
+
+  /* ══ BACKGROUND ORBS ═════════════════════════════════════════════════════ */
+  .bg-orb {
+    position: fixed; border-radius: 50%;
+    pointer-events: none; z-index: 0;
+  }
+  .bg-orb-1 {
+    width: 720px; height: 720px;
+    background: radial-gradient(circle, rgba(99,102,241,.09) 0%, transparent 65%);
+    top: -260px; right: -200px;
+    animation: orb-drift 18s ease-in-out infinite;
+  }
+  .bg-orb-2 {
+    width: 520px; height: 520px;
+    background: radial-gradient(circle, rgba(192,132,252,.07) 0%, transparent 65%);
+    bottom: -180px; left: -160px;
+    animation: orb-drift-r 22s ease-in-out infinite;
+  }
+  .bg-orb-3 {
+    width: 350px; height: 350px;
+    background: radial-gradient(circle, rgba(96,165,250,.06) 0%, transparent 65%);
+    top: 40%; left: 38%;
+    animation: orb-drift 28s ease-in-out infinite 4s;
+  }
 </style>
 """, unsafe_allow_html=True)
 
@@ -365,23 +468,32 @@ if "role" not in st.session_state:
 if st.session_state["role"] is None:
     # ── Landing page ──────────────────────────────────────────────────────────
     st.markdown("""
-<div style="text-align:center;padding:64px 0 0;">
-  <p style="color:rgba(255,255,255,.3);font-size:.78rem;letter-spacing:.12em;
-     text-transform:uppercase;margin:0 0 20px;">YouTube Trends Intelligence</p>
-  <h1 style="color:#ffffff;font-size:3.2rem;font-weight:700;
-     letter-spacing:-.05em;line-height:1.08;margin:0;">
+<div class="bg-orb bg-orb-1"></div>
+<div class="bg-orb bg-orb-2"></div>
+<div class="bg-orb bg-orb-3"></div>
+
+<div style="text-align:center;padding:72px 0 0;position:relative;z-index:1;">
+  <p style="color:rgba(255,255,255,.28);font-size:.72rem;letter-spacing:.16em;
+     text-transform:uppercase;margin:0 0 22px;
+     animation:fadeIn .8s ease both .05s;">
+    YouTube Trends Intelligence
+  </p>
+  <h1 style="color:#ffffff;font-size:3.4rem;font-weight:700;
+     letter-spacing:-.05em;line-height:1.06;margin:0;
+     animation:fadeUp .9s cubic-bezier(.16,1,.3,1) both .15s;">
     What's trending<br>
-    <span style="color:#818cf8;">right now</span>
+    <span class="gradient-text">right now</span>
   </h1>
-  <p style="color:rgba(255,255,255,.4);font-size:1rem;margin:20px auto 0;
-     max-width:420px;line-height:1.65;font-weight:400;">
-    Discover viral Shorts before they peak. CapCut recipes, hook texts,
-    and real engagement data — all in one dashboard.
+  <p style="color:rgba(255,255,255,.38);font-size:1rem;margin:22px auto 0;
+     max-width:400px;line-height:1.7;font-weight:400;
+     animation:fadeUp .9s cubic-bezier(.16,1,.3,1) both .28s;">
+    Discover viral Shorts before they peak. CapCut recipes,
+    hook texts, and real engagement data — all in one dashboard.
   </p>
 </div>
 """, unsafe_allow_html=True)
 
-    st.markdown("<div style='height:44px'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='height:44px;animation:fadeIn .6s ease both .38s;'></div>", unsafe_allow_html=True)
     _, col, _ = st.columns([1, 2, 1])
     with col:
         if st.button("🎯  Start for Free", use_container_width=True, type="primary"):
@@ -444,6 +556,30 @@ if st.session_state["role"] is None:
                 st.error("❌ Invalid key.")
 
     st.stop()
+
+
+# ── Scroll-reveal: IntersectionObserver adds .is-visible to .trend-card ──────
+components.html("""
+<script>
+(function(){
+  function init(){
+    var doc = window.parent.document;
+    var cards = doc.querySelectorAll('.trend-card');
+    if(!cards.length){ setTimeout(init, 400); return; }
+    var obs = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if(e.isIntersecting){
+          e.target.classList.add('is-visible');
+          obs.unobserve(e.target);
+        }
+      });
+    }, { threshold: 0.06 });
+    cards.forEach(function(c){ obs.observe(c); });
+  }
+  setTimeout(init, 700);
+})();
+</script>
+""", height=0)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1113,13 +1249,13 @@ with col_chart:
             color_discrete_sequence=["#6c63ff","#e040fb","#ff5252","#ff9800","#00bcd4","#4caf50","#f06292","#80cbc4"],
         )
         fig.update_layout(
-            paper_bgcolor="#08080f", plot_bgcolor="#13131f",
-            font_color="#d1d5db", height=440,
+            paper_bgcolor="#000000", plot_bgcolor="#0d0d0d",
+            font_color="rgba(255,255,255,.5)", height=440,
             margin=dict(l=0, r=24, t=10, b=10),
             yaxis=dict(tickfont=dict(size=10)),
-            legend=dict(bgcolor="#08080f", bordercolor="#2a2a3e"),
+            legend=dict(bgcolor="#000000", bordercolor="rgba(255,255,255,.08)"),
         )
-        fig.update_traces(textposition="outside", textfont_color="#f0f0ff")
+        fig.update_traces(textposition="outside", textfont_color="#ffffff")
         st.plotly_chart(fig, use_container_width=True)
 
 with col_export:
@@ -1188,22 +1324,22 @@ for trend in filtered:
                 f'<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">'
                 f'<div>'
                 f'<span class="badge {trend["badge"]}">{trend["hot_label"]}</span>'
-                f'<span class="badge" style="background:#1a1a35;color:#a78bfa;border:1px solid #3a3a6e;">{safe_niche}</span>'
-                f'<span class="badge" style="background:#0d2d1a;color:#4ade80;border:1px solid #166534;">{trend["content_format"]}</span>'
+                f'<span class="badge" style="background:rgba(99,102,241,.08);color:#a5b4fc;border:1px solid rgba(99,102,241,.2);">{safe_niche}</span>'
+                f'<span class="badge" style="background:rgba(56,189,248,.07);color:#7dd3fc;border:1px solid rgba(56,189,248,.18);">{trend["content_format"]}</span>'
                 f'{suspect_badge}'
                 f'</div>'
-                f'<div style="color:#4b5563;font-size:.78rem;background:#0a0a14;padding:3px 10px;border-radius:999px;border:1px solid #1e1e30;">🕒 {age_str}</div>'
+                f'<div style="color:rgba(255,255,255,.25);font-size:.75rem;background:rgba(255,255,255,.04);padding:3px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.07);">🕒 {age_str}</div>'
                 f'</div>'
-                f'<h3 style="color:#f0f0ff;margin:16px 0 4px;font-size:1.12rem;font-weight:800;line-height:1.4;letter-spacing:-.01em;">'
-                f'<a href="{trend["url"]}" target="_blank" style="color:#f0f0ff!important;">{safe_title}</a>'
+                f'<h3 style="color:#ffffff;margin:16px 0 4px;font-size:1.1rem;font-weight:700;line-height:1.45;letter-spacing:-.02em;">'
+                f'<a href="{trend["url"]}" target="_blank" style="color:#ffffff!important;">{safe_title}</a>'
                 f'</h3>'
-                f'<div style="color:#6b7280;font-size:.7rem;margin:12px 0 5px;letter-spacing:.06em;text-transform:uppercase;">🚀 Velocity Score</div>'
+                f'<div style="color:rgba(255,255,255,.22);font-size:.65rem;margin:14px 0 6px;letter-spacing:.1em;text-transform:uppercase;">Velocity Score</div>'
                 f'<div style="display:flex;align-items:center;gap:14px;margin-bottom:2px;">'
-                f'<div style="flex:1;background:#1e1e30;border-radius:999px;height:7px;">'
-                f'<div style="width:{bar_w}%;height:7px;border-radius:999px;background:linear-gradient(90deg,#6c63ff,#e040fb);box-shadow:0 0 10px rgba(108,99,255,.6);"></div>'
+                f'<div style="flex:1;background:rgba(255,255,255,.06);border-radius:999px;height:6px;overflow:hidden;">'
+                f'<div class="vel-bar-fill" style="width:{bar_w}%;height:6px;border-radius:999px;background:linear-gradient(90deg,#6366f1,#818cf8);"></div>'
                 f'</div>'
-                f'<div style="font-size:1.55rem;font-weight:900;color:#a78bfa;min-width:60px;text-align:right;line-height:1;">'
-                f'{vel}<span style="font-size:.68rem;color:#4b5563;font-weight:400;">/100</span>'
+                f'<div style="font-size:1.45rem;font-weight:700;color:#a5b4fc;min-width:56px;text-align:right;line-height:1;">'
+                f'{vel}<span style="font-size:.62rem;color:rgba(255,255,255,.2);font-weight:400;">/100</span>'
                 f'</div>'
                 f'</div>'
                 f'<div class="stats-grid">'

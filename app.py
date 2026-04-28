@@ -826,7 +826,7 @@ with st.sidebar:
 5. Post within **24 h** of the trend peak
     """)
     st.markdown("---")
-    st.caption("🔄 Cache: 2 h · ~4 API quota units/refresh\nv0.7 · TrendRadar · Global")
+    st.caption("TrendRadar · YouTube Trends Intelligence · v0.7")
 
     if role == "admin":
         st.markdown("---")
@@ -932,8 +932,8 @@ st.markdown(
     f'<div class="hero-meta">'
     f'<span>📡 Live data</span>'
     f'<span>🕒 Refreshed at {now_str}</span>'
-    f'<span>💡 ~4 quota units/refresh</span>'
-    f'<span>🔒 2-hour cache</span>'
+    f'<span>🔄 Updated every 2 hours</span>'
+    f'<span>✅ Real engagement only</span>'
     f'</div></div>',
     unsafe_allow_html=True,
 )
@@ -1014,7 +1014,7 @@ avg_eng     = round(sum(t["engagement"] for t in filtered) / max(len(filtered), 
 
 st.markdown(
     f'<div class="metric-row">'
-    f'<div class="metric-card fire"><div class="label">🔥 Viral Now</div><div class="value">{fire_count}</div><div class="sub">badge-fire videos</div></div>'
+    f'<div class="metric-card fire"><div class="label">🔥 Viral Now</div><div class="value">{fire_count}</div><div class="sub">videos trending hard</div></div>'
     f'<div class="metric-card purple"><div class="label">🚀 Avg Velocity</div><div class="value">{avg_vel}<span style="font-size:1rem;font-weight:600">/100</span></div><div class="sub">normalised score</div></div>'
     f'<div class="metric-card green"><div class="label">👁️ Total Views</div><div class="value">{format_count(total_views)}</div><div class="sub">combined reach</div></div>'
     f'<div class="metric-card"><div class="label">❤️ Avg Engagement</div><div class="value">{avg_eng}<span style="font-size:1rem;font-weight:600">%</span></div><div class="sub">top niche: {top_niche}</div></div>'

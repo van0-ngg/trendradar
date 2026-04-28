@@ -87,7 +87,45 @@ def _key_expired(c: dict) -> bool:
     except ValueError:
         return False
 
-def add_client_key(label: str = "", expires_days: int | None = 30) -> str:
+def _send_key_email(to_email: str, key: str, label: str, expires_at: str | None) -> bool:
+    smtp_host = str(st.secrets.get("SMTP_HOST", "")).strip()
+    smtp_user = str(st.secrets.get("SMTP_USER", "")).strip()
+    smtp_pass = str(st.secrets.get("SMTP_PASS", "")).strip()
+    smtp_from = str(st.secrets.get("SMTP_FROM", smtp_user)).strip()
+    smtp_port = int(st.secrets.get("SMTP_PORT", 587))
+    if not (smtp_host and smtp_user and smtp_pass and to_email):
+        return False
+    app_url   = str(st.secrets.get("APP_URL", "https://trendradar-d5xzalqvywsbdv39nroyjo.streamlit.app")).strip()
+    expiry_ln = f"Key expires: {expires_at[:10]}" if expires_at else "Key does not expire."
+    body = (
+        f"Hi {label},\n\n"
+        f"Your TrendRadar access key is ready:\n\n"
+        f"    {key}\n\n"
+        f"{expiry_ln}\n\n"
+        f"Dashboard: {app_url}\n"
+        f"Enter your key on the login screen to unlock the dashboard.\n\n"
+        f"—\nTrendRadar · YouTube Trends Intelligence\n"
+    )
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+    msg = MIMEMultipart()
+    msg["From"]    = smtp_from
+    msg["To"]      = to_email
+    msg["Subject"] = f"Your TrendRadar Access Key — {key}"
+    msg.attach(MIMEText(body, "plain"))
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port) as srv:
+            srv.ehlo(); srv.starttls()
+            srv.login(smtp_user, smtp_pass)
+            srv.sendmail(smtp_from, to_email, msg.as_string())
+        return True
+    except Exception as _e:
+        print(f"[TrendRadar] Email send failed: {_e!r}")
+        return False
+
+
+def add_client_key(label: str = "", expires_days: int | None = 30, email: str = "") -> str:
     part = lambda: _secrets.token_hex(2).upper()
     new_key = f"TR-{part()}-{part()}"
     expiry = (
@@ -99,13 +137,21 @@ def add_client_key(label: str = "", expires_days: int | None = 30) -> str:
         "label":      label or f"Client #{len(_load_clients()) + 1}",
         "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         "expires_at": expiry,
+        "email":      email or None,
     }
     if _use_supabase():
-        _supabase_client().table("clients").insert(record).execute()
+        try:
+            _supabase_client().table("clients").insert(record).execute()
+        except Exception:
+            rec_fb = {k: v for k, v in record.items() if k != "email"}
+            _supabase_client().table("clients").insert(rec_fb).execute()
     else:
         clients = _load_clients()
         clients.append(record)
         _save_clients(clients)
+    if email:
+        sent = _send_key_email(email, new_key, record["label"], expiry)
+        print(f"[TrendRadar] Key email {'sent' if sent else 'failed'} → {email}")
     return new_key
 
 def revoke_client_key(key: str) -> None:
@@ -319,6 +365,22 @@ if st.session_state["role"] is None:
             else:
                 st.error("❌ Invalid access key. Contact support to get one.")
         st.caption("Access keys are issued per client. Do not share yours.")
+
+    stripe_link = str(st.secrets.get("STRIPE_LINK", "")).strip()
+    if stripe_link:
+        st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+        buy_html = (
+            '<div style="text-align:center;padding:16px 0 8px;">'
+            '<div style="color:#6b7280;font-size:.83rem;margin-bottom:12px;">Don\'t have a key yet?</div>'
+            f'<a href="{html.escape(stripe_link)}" target="_blank" style="'
+            'display:inline-block;background:linear-gradient(90deg,#6c63ff,#e040fb);'
+            'color:#fff!important;font-weight:700;padding:12px 32px;border-radius:12px;'
+            'font-size:.95rem;text-decoration:none!important;'
+            'box-shadow:0 4px 18px rgba(108,99,255,.4);">💳 Buy Access</a>'
+            '<div style="color:#4b5563;font-size:.73rem;margin-top:10px;">'
+            'Secure checkout · Key delivered by email</div></div>'
+        )
+        st.markdown(buy_html, unsafe_allow_html=True)
 
     st.stop()
 
@@ -668,6 +730,16 @@ def load_trending_videos(region_code: str, country_name: str, fmt: str = "shorts
 def _log_usage(role: str, region_code: str, fmt: str) -> None:
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     print(f"[USAGE] {ts} | role={role} | region={region_code} | fmt={fmt}")
+    if _use_supabase():
+        try:
+            _supabase_client().table("usage_logs").insert({
+                "logged_at": ts,
+                "role":      role,
+                "region":    region_code,
+                "fmt":       fmt,
+            }).execute()
+        except Exception as _e:
+            print(f"[TrendRadar] Usage log failed: {_e!r}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -761,9 +833,14 @@ with st.sidebar:
         with st.expander("🛠️ Admin Dashboard", expanded=True):
             st.markdown("**Generate Client Key**")
             new_label = st.text_input(
-                "Client label (optional)",
+                "Client name / label",
                 placeholder="e.g. John Smith / Agency X",
                 key="admin_label",
+            )
+            new_email = st.text_input(
+                "Client email (auto-sends key if SMTP configured)",
+                placeholder="client@example.com",
+                key="admin_email",
             )
             expires_opt = st.selectbox(
                 "Expires in",
@@ -771,11 +848,17 @@ with st.sidebar:
                 format_func=lambda x: f"{x} days" if x else "Never",
                 key="admin_expires",
             )
-            if st.button("➕ Generate New Key", use_container_width=True, type="primary"):
-                st.session_state["last_generated_key"] = add_client_key(label=new_label, expires_days=expires_opt)
+            if st.button("➕ Generate & Send Key", use_container_width=True, type="primary"):
+                st.session_state["last_generated_key"] = add_client_key(
+                    label=new_label, expires_days=expires_opt, email=new_email.strip()
+                )
+                if new_email.strip():
+                    st.session_state["last_key_email"] = new_email.strip()
 
             if "last_generated_key" in st.session_state:
-                st.success("New key generated — copy it now:")
+                last_email = st.session_state.get("last_key_email", "")
+                sent_note  = f" · emailed to {last_email}" if last_email else " · no email sent (SMTP not set)"
+                st.success(f"Key generated{sent_note}:")
                 st.code(st.session_state["last_generated_key"], language=None)
 
             st.markdown("---")
@@ -797,11 +880,12 @@ with st.sidebar:
                         exp_display  = f"expires {exp_raw[:10]}" if exp_raw else "no expiry"
                         expired_tag  = ' <span style="color:#ef4444;font-weight:700;">EXPIRED</span>' if expired else ""
                         key_color    = "#6b7280" if expired else "#a78bfa"
+                        email_display = f' · ✉️ {c["email"]}' if c.get("email") else ""
                         st.markdown(
                             f'<div style="font-size:.78rem;color:{key_color};font-family:monospace;">'
                             f'{c["key"]}{expired_tag}</div>'
                             f'<div style="font-size:.7rem;color:#6b7280;">'
-                            f'{c.get("label","")} · {c.get("created_at","")} · {exp_display}</div>',
+                            f'{c.get("label","")} · {c.get("created_at","")} · {exp_display}{email_display}</div>',
                             unsafe_allow_html=True,
                         )
                     with col_btn:
@@ -810,6 +894,30 @@ with st.sidebar:
                             if st.session_state.get("last_generated_key") == c["key"]:
                                 del st.session_state["last_generated_key"]
                             st.rerun()
+
+            st.markdown("---")
+            st.markdown("**Usage Analytics**")
+            if _use_supabase():
+                try:
+                    logs = _supabase_client().table("usage_logs").select("*").order("logged_at", desc=True).limit(50).execute().data or []
+                    if logs:
+                        total = len(logs)
+                        by_region = {}
+                        by_role   = {}
+                        for lg in logs:
+                            by_region[lg.get("region","?")] = by_region.get(lg.get("region","?"), 0) + 1
+                            by_role[lg.get("role","?")]     = by_role.get(lg.get("role","?"), 0) + 1
+                        st.caption(f"Last 50 sessions — total tracked: {total}")
+                        top_regions = sorted(by_region.items(), key=lambda x: -x[1])[:5]
+                        st.caption("Top regions: " + " · ".join(f"{r}({n})" for r, n in top_regions))
+                        st.caption("By role: " + " · ".join(f"{r}({n})" for r, n in by_role.items()))
+                        st.caption(f"Latest: {logs[0]['logged_at']} — {logs[0].get('role','?')} / {logs[0].get('region','?')}")
+                    else:
+                        st.caption("No usage logs yet.")
+                except Exception:
+                    st.caption("Usage log table not found. Run SQL to create it.")
+            else:
+                st.caption("Supabase not connected — usage not tracked.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

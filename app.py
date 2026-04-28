@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import html
 import re
 import json
@@ -51,7 +51,22 @@ _AI_KEYWORDS = frozenset([
 
 CLIENTS_FILE = Path(__file__).parent / "clients.json"
 
+# ── Supabase: used when SUPABASE_URL + SUPABASE_KEY are set in secrets. ───────
+# Falls back to local clients.json for local dev / non-Supabase deploys.
+def _use_supabase() -> bool:
+    return bool(st.secrets.get("SUPABASE_URL") and st.secrets.get("SUPABASE_KEY"))
+
+@st.cache_resource
+def _supabase_client():
+    from supabase import create_client  # noqa: PLC0415
+    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+
 def _load_clients() -> list[dict]:
+    if _use_supabase():
+        try:
+            return _supabase_client().table("clients").select("*").execute().data or []
+        except Exception:
+            return []
     if not CLIENTS_FILE.exists():
         CLIENTS_FILE.write_text("[]", encoding="utf-8")
     try:
@@ -62,24 +77,46 @@ def _load_clients() -> list[dict]:
 def _save_clients(clients: list[dict]) -> None:
     CLIENTS_FILE.write_text(json.dumps(clients, indent=2, ensure_ascii=False), encoding="utf-8")
 
-def add_client_key(label: str = "") -> str:
+def _key_expired(c: dict) -> bool:
+    exp = c.get("expires_at")
+    if not exp:
+        return False
+    try:
+        exp_dt = datetime.strptime(exp, "%Y-%m-%d %H:%M UTC").replace(tzinfo=timezone.utc)
+        return exp_dt < datetime.now(timezone.utc)
+    except ValueError:
+        return False
+
+def add_client_key(label: str = "", expires_days: int | None = 30) -> str:
     part = lambda: _secrets.token_hex(2).upper()
     new_key = f"TR-{part()}-{part()}"
-    clients = _load_clients()
-    clients.append({
-        "key": new_key,
-        "label": label or f"Client #{len(clients) + 1}",
+    expiry = (
+        (datetime.now(timezone.utc) + timedelta(days=expires_days)).strftime("%Y-%m-%d %H:%M UTC")
+        if expires_days else None
+    )
+    record = {
+        "key":        new_key,
+        "label":      label or f"Client #{len(_load_clients()) + 1}",
         "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-    })
-    _save_clients(clients)
+        "expires_at": expiry,
+    }
+    if _use_supabase():
+        _supabase_client().table("clients").insert(record).execute()
+    else:
+        clients = _load_clients()
+        clients.append(record)
+        _save_clients(clients)
     return new_key
 
 def revoke_client_key(key: str) -> None:
-    clients = [c for c in _load_clients() if c["key"] != key]
-    _save_clients(clients)
+    if _use_supabase():
+        _supabase_client().table("clients").delete().eq("key", key).execute()
+    else:
+        clients = [c for c in _load_clients() if c["key"] != key]
+        _save_clients(clients)
 
 def client_keys_set() -> set[str]:
-    return {c["key"] for c in _load_clients()}
+    return {c["key"] for c in _load_clients() if not _key_expired(c)}
 
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -269,8 +306,12 @@ if st.session_state["role"] is None:
         if st.button("🔓 Unlock Access", use_container_width=True, type="primary"):
             k = key_input.strip()
             admin_keys = list(st.secrets.get("ADMIN_KEYS", []))
+            demo_key   = str(st.secrets.get("DEMO_KEY", "")).strip()
             if k and k in admin_keys:
                 st.session_state["role"] = "admin"
+                st.rerun()
+            elif k and demo_key and k == demo_key:
+                st.session_state["role"] = "demo"
                 st.rerun()
             elif k and k in client_keys_set():
                 st.session_state["role"] = "user"
@@ -502,7 +543,7 @@ def tag_content_format(title: str, desc: str) -> str:
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  FETCH DATA — videos.list(chart="mostPopular") · up to 4 pages · ~4 quota units
-#  Format split done locally: Shorts ≤ 60 s, Long > 5 m. No server-side filters.
+#  Format split done locally: Shorts ≤ 60 s, Long > 2 m. No server-side filters.
 # ══════════════════════════════════════════════════════════════════════════════
 
 @st.cache_data(ttl=7200, show_spinner=False)
@@ -624,6 +665,11 @@ def load_trending_videos(region_code: str, country_name: str, fmt: str = "shorts
     return None  # all keys exhausted
 
 
+def _log_usage(role: str, region_code: str, fmt: str) -> None:
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    print(f"[USAGE] {ts} | role={role} | region={region_code} | fmt={fmt}")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  SIDEBAR
 # ══════════════════════════════════════════════════════════════════════════════
@@ -636,6 +682,13 @@ with st.sidebar:
             '<div style="background:linear-gradient(90deg,#1a1a35,#1e1530);border:1px solid #6c63ff;'
             'border-radius:10px;padding:8px 14px;font-size:.8rem;color:#a78bfa;margin-bottom:12px;">'
             '🛡️ Logged in as <strong>Admin</strong></div>',
+            unsafe_allow_html=True,
+        )
+    elif role == "demo":
+        st.markdown(
+            '<div style="background:linear-gradient(90deg,#0d1f10,#101f15);border:1px solid #4ade80;'
+            'border-radius:10px;padding:8px 14px;font-size:.8rem;color:#4ade80;margin-bottom:12px;">'
+            '🎯 <strong>Demo Mode</strong> — US only · no CSV export</div>',
             unsafe_allow_html=True,
         )
     else:
@@ -655,12 +708,21 @@ with st.sidebar:
     )
     fmt_key = "shorts" if content_fmt == "Shorts (≤ 60s)" else "long"
 
-    country_name = st.selectbox(
-        "🌍 Market",
-        list(COUNTRIES.keys()),
-        index=0,
-        help="Filters YouTube trending chart by region",
-    )
+    if role == "demo":
+        country_name = "🇺🇸 United States"
+        st.markdown(
+            '<div style="font-size:.85rem;color:#9ca3af;margin:4px 0 12px;">🌍 Market — '
+            '<strong style="color:#f0f0ff;">🇺🇸 United States</strong> '
+            '<span style="color:#4b5563;font-size:.75rem;">(demo locked)</span></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        country_name = st.selectbox(
+            "🌍 Market",
+            list(COUNTRIES.keys()),
+            index=0,
+            help="Filters YouTube trending chart by region",
+        )
     selected_country = COUNTRIES[country_name]
 
     sort_by = st.selectbox(
@@ -703,8 +765,14 @@ with st.sidebar:
                 placeholder="e.g. John Smith / Agency X",
                 key="admin_label",
             )
+            expires_opt = st.selectbox(
+                "Expires in",
+                [30, 60, 90, 180, 365, None],
+                format_func=lambda x: f"{x} days" if x else "Never",
+                key="admin_expires",
+            )
             if st.button("➕ Generate New Key", use_container_width=True, type="primary"):
-                st.session_state["last_generated_key"] = add_client_key(label=new_label)
+                st.session_state["last_generated_key"] = add_client_key(label=new_label, expires_days=expires_opt)
 
             if "last_generated_key" in st.session_state:
                 st.success("New key generated — copy it now:")
@@ -724,9 +792,16 @@ with st.sidebar:
                 for c in clients:
                     col_info, col_btn = st.columns([3, 1])
                     with col_info:
+                        expired      = _key_expired(c)
+                        exp_raw      = c.get("expires_at")
+                        exp_display  = f"expires {exp_raw[:10]}" if exp_raw else "no expiry"
+                        expired_tag  = ' <span style="color:#ef4444;font-weight:700;">EXPIRED</span>' if expired else ""
+                        key_color    = "#6b7280" if expired else "#a78bfa"
                         st.markdown(
-                            f'<div style="font-size:.78rem;color:#a78bfa;font-family:monospace;">{c["key"]}</div>'
-                            f'<div style="font-size:.7rem;color:#6b7280;">{c.get("label","")} · {c.get("created_at","")}</div>',
+                            f'<div style="font-size:.78rem;color:{key_color};font-family:monospace;">'
+                            f'{c["key"]}{expired_tag}</div>'
+                            f'<div style="font-size:.7rem;color:#6b7280;">'
+                            f'{c.get("label","")} · {c.get("created_at","")} · {exp_display}</div>',
                             unsafe_allow_html=True,
                         )
                     with col_btn:
@@ -763,15 +838,24 @@ st.markdown(
 with st.spinner(f"Loading {content_fmt} for {country_name}…"):
     try:
         all_trends = load_trending_videos(selected_country["code"], country_name, fmt_key)
+        if all_trends is not None:
+            _log_usage(role, selected_country["code"], fmt_key)
     except HttpError as e:
         st.error(f"YouTube API error: {e}")
         st.stop()
 
 if all_trends is None:
+    now_utc   = datetime.now(timezone.utc)
+    reset_utc = now_utc.replace(hour=8, minute=0, second=0, microsecond=0)
+    if reset_utc <= now_utc:
+        reset_utc += timedelta(days=1)
+    hours_left = int((reset_utc - now_utc).total_seconds() // 3600)
+    mins_left  = int(((reset_utc - now_utc).total_seconds() % 3600) // 60)
     st.warning(
-        "We are experiencing unusually high traffic. "
-        "Fetching the latest cached trends. "
-        "Please try refreshing in a few hours."
+        f"⚠️ **API quota exhausted for today.**\n\n"
+        f"YouTube resets quotas daily at **08:00 UTC** "
+        f"(in ~**{hours_left}h {mins_left}m**). "
+        f"Try refreshing after that or contact support."
     )
     st.stop()
 
@@ -861,7 +945,7 @@ with col_chart:
 
 with col_export:
     st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-    if filtered:
+    if filtered and role != "demo":
         csv_df = pd.DataFrame([{
             "Title":          t["title"],
             "URL":            t["url"],
@@ -881,6 +965,12 @@ with col_export:
             file_name=f"trendradar_{selected_country['code']}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
             mime="text/csv",
             use_container_width=True,
+        )
+    elif role == "demo":
+        st.markdown(
+            '<div style="font-size:.75rem;color:#4b5563;text-align:center;padding:8px 0;">'
+            '⬇️ CSV Export<br><span style="color:#374151;">upgrade to unlock</span></div>',
+            unsafe_allow_html=True,
         )
 
 

@@ -40,6 +40,11 @@ _PODCAST_RE = re.compile(
     re.IGNORECASE,
 )
 
+_AI_KEYWORDS = frozenset([
+    "ai ", "chatgpt", "midjourney", "elevenlabs", "gpt", "нейросеть",
+    "ии ", "heygen", "artificial intelligence", "openai",
+])
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  CLIENT KEY DATABASE
 # ══════════════════════════════════════════════════════════════════════════════
@@ -327,10 +332,6 @@ def velocity_score(views: int, age_hours: float) -> float:
 
 def categorise(title: str, description: str) -> str:
     text = (title + " " + description).lower()
-    _AI_KEYWORDS = [
-        "ai ", "chatgpt", "midjourney", "elevenlabs", "gpt", "нейросеть",
-        "ии ", "heygen", "artificial intelligence", "openai",
-    ]
     if any(k in text for k in _AI_KEYWORDS):
         return "🤖 AI & Tech"
     if not _HAS_LATIN_RE.search(title):
@@ -535,12 +536,6 @@ def fetch_trending_videos(region_code: str, country_name: str, key_index: int = 
     # ── Split by format, score, build result list (no hard server-side filters) ─
     results: list[dict] = []
     for item in all_items:
-        vid_id       = item["id"]
-        duration_str = item.get("contentDetails", {}).get("duration", "MISSING")
-        duration_sec = _duration_seconds(duration_str)
-        views        = int(item.get("statistics", {}).get("viewCount", 0))
-        print(f"DEBUG VIDEO: ID={vid_id}, Raw_Duration={duration_str}, Sec={duration_sec}, Views={views}")
-
         if fmt == "shorts":
             if not is_short(item):
                 continue
@@ -655,7 +650,7 @@ with st.sidebar:
 
     content_fmt = st.radio(
         "📺 Content Format",
-        ["Shorts (≤ 60s)", "Long Videos (> 5m)"],
+        ["Shorts (≤ 60s)", "Long Videos (> 2m)"],
         horizontal=True,
     )
     fmt_key = "shorts" if content_fmt == "Shorts (≤ 60s)" else "long"
@@ -697,7 +692,7 @@ with st.sidebar:
 5. Post within **24 h** of the trend peak
     """)
     st.markdown("---")
-    st.caption("🔄 Cache: 1 h · ~8 API quota units/refresh\nv0.7 · TrendRadar · Global")
+    st.caption("🔄 Cache: 2 h · ~4 API quota units/refresh\nv0.7 · TrendRadar · Global")
 
     if role == "admin":
         st.markdown("---")
@@ -899,132 +894,129 @@ st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 # ══════════════════════════════════════════════════════════════════════════════
 
 for trend in filtered:
-  try:
-    vel     = trend.get("velocity_score", 0.0)
-    bar_w   = int(vel)
-    age_str = trend.get("age_str", "?")
+    try:
+        vel     = trend.get("velocity_score", 0.0)
+        bar_w   = int(vel)
+        age_str = trend.get("age_str", "?")
 
-    col_img, col_main = st.columns([1, 5])
+        col_img, col_main = st.columns([1, 5])
 
-    with col_img:
-        if trend["thumb"]:
-            st.image(trend["thumb"], use_container_width=True)
+        with col_img:
+            if trend["thumb"]:
+                st.image(trend["thumb"], use_container_width=True)
 
-    with col_main:
-        safe_title = html.escape(trend["title"]).replace("\n", " ").replace("\r", "").strip()
-        safe_niche = html.escape(trend["niche"]).replace("\n", " ").replace("\r", "").strip()
-        suspect_badge = (
-            '<span class="badge" style="background:#2d1a0d;color:#fb923c;border:1px solid #9a3412;">⚠️ Suspect Engagement</span>'
-            if trend.get("suspect_engagement") else ""
-        )
-        card_html = (
-            f'<div class="trend-card">'
-            # ── top row: badges + age ──
-            f'<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">'
-            f'<div>'
-            f'<span class="badge {trend["badge"]}">{trend["hot_label"]}</span>'
-            f'<span class="badge" style="background:#1a1a35;color:#a78bfa;border:1px solid #3a3a6e;">{safe_niche}</span>'
-            f'<span class="badge" style="background:#0d2d1a;color:#4ade80;border:1px solid #166534;">{trend["content_format"]}</span>'
-            f'{suspect_badge}'
-            f'</div>'
-            f'<div style="color:#4b5563;font-size:.78rem;background:#0a0a14;padding:3px 10px;border-radius:999px;border:1px solid #1e1e30;">🕒 {age_str}</div>'
-            f'</div>'
-            # ── title ──
-            f'<h3 style="color:#f0f0ff;margin:16px 0 4px;font-size:1.12rem;font-weight:800;line-height:1.4;letter-spacing:-.01em;">'
-            f'<a href="{trend["url"]}" target="_blank" style="color:#f0f0ff!important;">{safe_title}</a>'
-            f'</h3>'
-            # ── velocity bar ──
-            f'<div style="color:#6b7280;font-size:.7rem;margin:12px 0 5px;letter-spacing:.06em;text-transform:uppercase;">🚀 Velocity Score</div>'
-            f'<div style="display:flex;align-items:center;gap:14px;margin-bottom:2px;">'
-            f'<div style="flex:1;background:#1e1e30;border-radius:999px;height:7px;">'
-            f'<div style="width:{bar_w}%;height:7px;border-radius:999px;background:linear-gradient(90deg,#6c63ff,#e040fb);box-shadow:0 0 10px rgba(108,99,255,.6);"></div>'
-            f'</div>'
-            f'<div style="font-size:1.55rem;font-weight:900;color:#a78bfa;min-width:60px;text-align:right;line-height:1;">'
-            f'{vel}<span style="font-size:.68rem;color:#4b5563;font-weight:400;">/100</span>'
-            f'</div>'
-            f'</div>'
-            # ── stats grid ──
-            f'<div class="stats-grid">'
-            f'<div class="stat-item"><span class="stat-icon">👁️</span><div class="stat-value">{format_count(trend["views"])}</div><div class="stat-label">Views</div></div>'
-            f'<div class="stat-item"><span class="stat-icon">❤️</span><div class="stat-value blue">{format_count(trend["likes"])}</div><div class="stat-label">Likes</div></div>'
-            f'<div class="stat-item"><span class="stat-icon">💬</span><div class="stat-value purple">{format_count(trend["comments"])}</div><div class="stat-label">Comments</div></div>'
-            f'<div class="stat-item"><span class="stat-icon">📊</span><div class="stat-value orange">{trend["engagement"]}%</div><div class="stat-label">Engagement</div></div>'
-            f'</div>'
-            f'</div>'
-        )
-        st.markdown(card_html, unsafe_allow_html=True)
-
-    with st.expander(f"🎬 CapCut Recipe — {trend['title'][:40]}…"):
-        s = trend["sound"]
-        tab1, tab2, tab3, tab4 = st.tabs(["🎵 Sound & Pace", "📝 Hook Texts", "🎬 CapCut Steps", "🎨 Midjourney"])
-
-        with tab1:
-            st.markdown(
-                f'<div class="recipe-block">'
-                f'<h4>🎵 Recommended Sound</h4>'
-                f'<div class="sound-pill">🎵 {s["name"]} — {s["artist"]}</div>'
-                f'<p style="color:#9ca3af;font-size:.85rem;margin:12px 0 4px;">'
-                f'BPM: <strong style="color:#f0f0ff">{s["bpm"]}</strong> &nbsp;|&nbsp; Vibe: <strong style="color:#f0f0ff">{s["vibe"]}</strong>'
-                f'</p><a href="{s["link"]}" target="_blank">🔍 Find on YouTube →</a></div>'
-                f'<div class="recipe-block" style="margin-top:12px;border-color:#6c63ff;">'
-                f'<h4 style="color:#a78bfa;">✂️ Editing Pace</h4>'
-                f'<p style="color:#f0f0ff;font-size:1rem;margin:0;"><strong>{trend["pace_label"]}</strong></p>'
-                f'<p style="color:#9ca3af;font-size:.85rem;margin:6px 0 0;">'
-                f'~{trend["cuts_per_min"]} cuts/min &nbsp;|&nbsp; Transition: <strong style="color:#f0f0ff">{trend["transition"]}</strong>'
-                f'</p></div>',
-                unsafe_allow_html=True,
+        with col_main:
+            safe_title = html.escape(trend["title"]).replace("\n", " ").replace("\r", "").strip()
+            safe_niche = html.escape(trend["niche"]).replace("\n", " ").replace("\r", "").strip()
+            suspect_badge = (
+                '<span class="badge" style="background:#2d1a0d;color:#fb923c;border:1px solid #9a3412;">⚠️ Suspect Engagement</span>'
+                if trend.get("suspect_engagement") else ""
             )
+            card_html = (
+                f'<div class="trend-card">'
+                f'<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;">'
+                f'<div>'
+                f'<span class="badge {trend["badge"]}">{trend["hot_label"]}</span>'
+                f'<span class="badge" style="background:#1a1a35;color:#a78bfa;border:1px solid #3a3a6e;">{safe_niche}</span>'
+                f'<span class="badge" style="background:#0d2d1a;color:#4ade80;border:1px solid #166534;">{trend["content_format"]}</span>'
+                f'{suspect_badge}'
+                f'</div>'
+                f'<div style="color:#4b5563;font-size:.78rem;background:#0a0a14;padding:3px 10px;border-radius:999px;border:1px solid #1e1e30;">🕒 {age_str}</div>'
+                f'</div>'
+                f'<h3 style="color:#f0f0ff;margin:16px 0 4px;font-size:1.12rem;font-weight:800;line-height:1.4;letter-spacing:-.01em;">'
+                f'<a href="{trend["url"]}" target="_blank" style="color:#f0f0ff!important;">{safe_title}</a>'
+                f'</h3>'
+                f'<div style="color:#6b7280;font-size:.7rem;margin:12px 0 5px;letter-spacing:.06em;text-transform:uppercase;">🚀 Velocity Score</div>'
+                f'<div style="display:flex;align-items:center;gap:14px;margin-bottom:2px;">'
+                f'<div style="flex:1;background:#1e1e30;border-radius:999px;height:7px;">'
+                f'<div style="width:{bar_w}%;height:7px;border-radius:999px;background:linear-gradient(90deg,#6c63ff,#e040fb);box-shadow:0 0 10px rgba(108,99,255,.6);"></div>'
+                f'</div>'
+                f'<div style="font-size:1.55rem;font-weight:900;color:#a78bfa;min-width:60px;text-align:right;line-height:1;">'
+                f'{vel}<span style="font-size:.68rem;color:#4b5563;font-weight:400;">/100</span>'
+                f'</div>'
+                f'</div>'
+                f'<div class="stats-grid">'
+                f'<div class="stat-item"><span class="stat-icon">👁️</span><div class="stat-value">{format_count(trend["views"])}</div><div class="stat-label">Views</div></div>'
+                f'<div class="stat-item"><span class="stat-icon">❤️</span><div class="stat-value blue">{format_count(trend["likes"])}</div><div class="stat-label">Likes</div></div>'
+                f'<div class="stat-item"><span class="stat-icon">💬</span><div class="stat-value purple">{format_count(trend["comments"])}</div><div class="stat-label">Comments</div></div>'
+                f'<div class="stat-item"><span class="stat-icon">📊</span><div class="stat-value orange">{trend["engagement"]}%</div><div class="stat-label">Engagement</div></div>'
+                f'</div>'
+                f'</div>'
+            )
+            st.markdown(card_html, unsafe_allow_html=True)
 
-        with tab2:
-            st.markdown('<div class="recipe-block"><h4>📝 Hook Options — paste into CapCut text layer</h4>', unsafe_allow_html=True)
-            for hook in trend["hooks"]:
-                st.markdown(f'<div class="hook-box">"{html.escape(hook)}"</div>', unsafe_allow_html=True)
-            st.markdown("</div>", unsafe_allow_html=True)
-            st.info("💡 Use the hook as your FIRST text on screen (0:00–0:02). Big bold white font on dark background.")
+        with st.expander(f"🎬 CapCut Recipe — {trend['title'][:40]}…"):
+            s = trend["sound"]
+            tab1, tab2, tab3, tab4 = st.tabs(["🎵 Sound & Pace", "📝 Hook Texts", "🎬 CapCut Steps", "🎨 Midjourney"])
 
-        with tab3:
-            st.markdown('<div class="recipe-block"><h4>🎬 CapCut Step-by-Step Script</h4>', unsafe_allow_html=True)
-            for i, (tc, instr) in enumerate(trend["capcut_steps"], 1):
+            with tab1:
                 st.markdown(
-                    f'<div class="capcut-step">'
-                    f'<div class="step-num">{i}</div>'
-                    f'<div class="step-text"><strong>{tc}</strong><br>{instr}</div>'
-                    f'</div>',
+                    f'<div class="recipe-block">'
+                    f'<h4>🎵 Recommended Sound</h4>'
+                    f'<div class="sound-pill">🎵 {s["name"]} — {s["artist"]}</div>'
+                    f'<p style="color:#9ca3af;font-size:.85rem;margin:12px 0 4px;">'
+                    f'BPM: <strong style="color:#f0f0ff">{s["bpm"]}</strong> &nbsp;|&nbsp; Vibe: <strong style="color:#f0f0ff">{s["vibe"]}</strong>'
+                    f'</p><a href="{s["link"]}" target="_blank">🔍 Find on YouTube →</a></div>'
+                    f'<div class="recipe-block" style="margin-top:12px;border-color:#6c63ff;">'
+                    f'<h4 style="color:#a78bfa;">✂️ Editing Pace</h4>'
+                    f'<p style="color:#f0f0ff;font-size:1rem;margin:0;"><strong>{trend["pace_label"]}</strong></p>'
+                    f'<p style="color:#9ca3af;font-size:.85rem;margin:6px 0 0;">'
+                    f'~{trend["cuts_per_min"]} cuts/min &nbsp;|&nbsp; Transition: <strong style="color:#f0f0ff">{trend["transition"]}</strong>'
+                    f'</p></div>',
                     unsafe_allow_html=True,
                 )
-            st.markdown("</div>", unsafe_allow_html=True)
-            st.success("✅ Total: 30 seconds | Optimized for YouTube Shorts algorithm")
 
-        with tab4:
-            st.markdown(
-                '<div class="recipe-block" style="border-color:#a78bfa;">'
-                '<h4 style="color:#a78bfa;">🎨 Midjourney Background Prompt</h4>'
-                '<p style="color:#9ca3af;font-size:.85rem;margin:0 0 10px;">Paste into Midjourney to generate a 9:16 cinematic background.</p>'
-                '</div>',
-                unsafe_allow_html=True,
+            with tab2:
+                st.markdown('<div class="recipe-block"><h4>📝 Hook Options — paste into CapCut text layer</h4>', unsafe_allow_html=True)
+                for hook in trend["hooks"]:
+                    st.markdown(f'<div class="hook-box">"{html.escape(hook)}"</div>', unsafe_allow_html=True)
+                st.markdown("</div>", unsafe_allow_html=True)
+                st.info("💡 Use the hook as your FIRST text on screen (0:00–0:02). Big bold white font on dark background.")
+
+            with tab3:
+                st.markdown('<div class="recipe-block"><h4>🎬 CapCut Step-by-Step Script</h4>', unsafe_allow_html=True)
+                for i, (tc, instr) in enumerate(trend["capcut_steps"], 1):
+                    st.markdown(
+                        f'<div class="capcut-step">'
+                        f'<div class="step-num">{i}</div>'
+                        f'<div class="step-text"><strong>{tc}</strong><br>{instr}</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                st.markdown("</div>", unsafe_allow_html=True)
+                st.success("✅ Total: 30 seconds | Optimized for YouTube Shorts algorithm")
+
+            with tab4:
+                st.markdown(
+                    '<div class="recipe-block" style="border-color:#a78bfa;">'
+                    '<h4 style="color:#a78bfa;">🎨 Midjourney Background Prompt</h4>'
+                    '<p style="color:#9ca3af;font-size:.85rem;margin:0 0 10px;">Paste into Midjourney to generate a 9:16 cinematic background.</p>'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
+                st.code(trend["mj_prompt"], language=None)
+                st.caption("Copy icon (top-right) → paste into Midjourney Discord")
+
+            st.markdown("---")
+            st.markdown("##### 📋 Full Recipe — copy everything at once")
+            full_recipe = (
+                f"TREND: {trend['title']}\n"
+                f"URL: {trend['url']}\n"
+                f"Niche: {trend['niche']} | Velocity: {trend['velocity_score']}/100\n\n"
+                f"━━━ HOOK TEXT (0:00–0:02) ━━━\n{trend['hooks'][0]}\n\n"
+                f"━━━ SOUND ━━━\n{s['name']} — {s['artist']}\nBPM: {s['bpm']} | Vibe: {s['vibe']}\nFind it: {s['link']}\n\n"
+                f"━━━ EDITING PACE ━━━\n{trend['pace_label']} (~{trend['cuts_per_min']} cuts/min)\nTransition: {trend['transition']}\n\n"
+                f"━━━ CAPCUT SCRIPT ━━━\n"
+                + "\n".join(f"{tc}  {instr}" for tc, instr in trend["capcut_steps"])
+                + f"\n\n━━━ MIDJOURNEY PROMPT ━━━\n{trend['mj_prompt']}\n"
             )
-            st.code(trend["mj_prompt"], language=None)
-            st.caption("Copy icon (top-right) → paste into Midjourney Discord")
+            st.code(full_recipe, language=None)
 
-        st.markdown("---")
-        st.markdown("##### 📋 Full Recipe — copy everything at once")
-        full_recipe = (
-            f"TREND: {trend['title']}\n"
-            f"URL: {trend['url']}\n"
-            f"Niche: {trend['niche']} | Velocity: {trend['velocity_score']}/100\n\n"
-            f"━━━ HOOK TEXT (0:00–0:02) ━━━\n{trend['hooks'][0]}\n\n"
-            f"━━━ SOUND ━━━\n{s['name']} — {s['artist']}\nBPM: {s['bpm']} | Vibe: {s['vibe']}\nFind it: {s['link']}\n\n"
-            f"━━━ EDITING PACE ━━━\n{trend['pace_label']} (~{trend['cuts_per_min']} cuts/min)\nTransition: {trend['transition']}\n\n"
-            f"━━━ CAPCUT SCRIPT ━━━\n"
-            + "\n".join(f"{tc}  {instr}" for tc, instr in trend["capcut_steps"])
-            + f"\n\n━━━ MIDJOURNEY PROMPT ━━━\n{trend['mj_prompt']}\n"
-        )
-        st.code(full_recipe, language=None)
+        st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="section-divider"></div>', unsafe_allow_html=True)
-  except Exception as _card_err:
-    print(f"[TrendRadar] Card render error for '{trend.get('title','?')[:50]}': {_card_err!r}")
-    st.warning(f"Could not render card: {_card_err}")
+    except Exception as _card_err:
+        print(f"[TrendRadar] Card render error for '{trend.get('title', '?')[:50]}': {_card_err!r}")
+        st.warning(f"Could not render card: {_card_err}")
 
 
 # ── Footer ────────────────────────────────────────────────────────────────────

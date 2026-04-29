@@ -1174,14 +1174,9 @@ if all_trends is None:
     )
     st.stop()
 
-if not all_trends:
-    label = "Shorts" if fmt_key == "shorts" else "Long Videos"
-    st.warning(f"No {label} found matching the criteria. Try lowering filters or changing the market.")
-    st.stop()
-
-# ── Sidebar filters (need data first) ────────────────────────────────────────
-all_niches  = sorted(set(t["niche"]          for t in all_trends))
-all_formats = sorted(set(t["content_format"] for t in all_trends))
+# ── Sidebar filters (always visible) ─────────────────────────────────────────
+all_niches  = sorted(set(t["niche"]          for t in all_trends)) if all_trends else []
+all_formats = sorted(set(t["content_format"] for t in all_trends)) if all_trends else []
 with st.sidebar:
     st.markdown("---")
     st.markdown("### 🔎 Filters")
@@ -1190,6 +1185,11 @@ with st.sidebar:
         "Content Format", all_formats, default=all_formats,
         help="Original creator content, stream clips, or podcast snippets",
     )
+
+if not all_trends:
+    label = "Shorts" if fmt_key == "shorts" else "Long Videos"
+    st.warning(f"No {label} found matching the criteria. Try lowering filters or changing the market.")
+    st.stop()
 
 min_views = min_views_k * 1_000
 filtered = [

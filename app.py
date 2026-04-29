@@ -613,15 +613,15 @@ def _duration_seconds(duration_str: str) -> int:
     return hours * 3600 + minutes * 60 + seconds
 
 def is_short(item: dict) -> bool:
-    """True if video is ≤ 60 s OR explicitly tagged #shorts."""
+    """True if video is ≤ 180 s (YouTube Shorts expanded to 3 min in Oct 2024) OR tagged #shorts."""
     raw   = item.get("contentDetails", {}).get("duration", "PT0S")
     title = item.get("snippet", {}).get("title", "").lower()
     tags  = " ".join(item.get("snippet", {}).get("tags", [])).lower()
-    return _duration_seconds(raw) <= 60 or "#shorts" in title or "#short" in title or "#shorts" in tags
+    return _duration_seconds(raw) <= 180 or "#shorts" in title or "#short" in title or "#shorts" in tags
 
 def is_long_video(item: dict) -> bool:
-    """True if video is strictly > 2 minutes (120 s)."""
-    return _duration_seconds(item.get("contentDetails", {}).get("duration", "PT0S")) > 120
+    """True if video is strictly > 3 minutes (180 s)."""
+    return _duration_seconds(item.get("contentDetails", {}).get("duration", "PT0S")) > 180
 
 def hours_since(published_at: str) -> float:
     pub = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
